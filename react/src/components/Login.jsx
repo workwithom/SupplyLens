@@ -205,7 +205,7 @@ const Login = () => {
                 <input
                   type="email"
                   name="email"
-                  value={}
+                  
                   onChange={handleChange}
                   className="w-full px-4 py-3 bg-black/30 border border-white/20 rounded-full text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-pink-500/50 focus:border-transparent"
                   placeholder="Enter your email"
