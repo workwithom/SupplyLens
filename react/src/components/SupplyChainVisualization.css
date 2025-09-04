@@ -1,0 +1,446 @@
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideInFromSide {
+  from {
+    opacity: 0;
+    transform: translateX(var(--slide-from)) scale(0.8);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes drawLine {
+  from {
+    stroke-dashoffset: 1000;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes moveVehicle {
+  0% {
+    transform: translate(var(--start-x), var(--start-y)) var(--rotate);
+  }
+  50% {
+    transform: translate(var(--mid-x), var(--mid-y)) var(--rotate);
+  }
+  100% {
+    transform: translate(var(--end-x), var(--end-y)) var(--rotate);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+@keyframes flowAnimation {
+  0% {
+    stroke-dashoffset: 100;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.supply-chain-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+  min-height: 100vh;
+  background: linear-gradient(to bottom right, #f0f9ff, #e0f2fe);
+}
+
+/* Route Diagram Styles */
+.route-diagram-container {
+  margin: 3rem 0;
+  padding: 2rem;
+  background: white;
+  border-radius: 1.5rem;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+}
+
+.route-diagram-container.simulation-active {
+  border: 3px solid #8b5cf6;
+  box-shadow: 0 20px 40px rgba(139, 92, 246, 0.2);
+  background: linear-gradient(135deg, #faf5ff 0%, #ffffff 100%);
+}
+
+.simulation-banner {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: white;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  margin-bottom: 2rem;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+.simulation-banner-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.route-timeline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  padding: 2rem 0;
+}
+
+.route-node-container {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  position: relative;
+}
+
+.route-node {
+  display: flex;
+  align-items: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  position: relative;
+  z-index: 10;
+  animation: fadeInScale 0.6s ease-out forwards;
+  animation-delay: calc(var(--index, 0) * 0.2s);
+  opacity: 0;
+}
+
+.route-node:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+  transition: all 0.3s ease;
+}
+
+.node-number {
+  background: white;
+  color: #667eea;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 1.2rem;
+  margin-right: 1rem;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.node-content {
+  color: white;
+}
+
+.node-location {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+}
+
+.node-state {
+  font-size: 0.9rem;
+  opacity: 0.9;
+  margin: 0;
+}
+
+.route-connection {
+  flex: 1;
+  position: relative;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.connection-line {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  transform: translateY(-50%);
+  border-radius: 2px;
+  animation: flowAnimation 2s ease-in-out infinite;
+}
+
+.transport-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.transport-indicator {
+  background: white;
+  border-radius: 50%;
+  width: 4rem;
+  height: 4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+  animation: pulse 2s ease-in-out infinite;
+  position: relative;
+}
+
+.transport-icon {
+  width: 2rem;
+  height: 2rem;
+  color: #667eea;
+}
+
+.transport-label {
+  position: absolute;
+  bottom: -2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #667eea;
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Summary Section */
+.summary-section {
+  margin-top: 3rem;
+}
+
+.summary-card {
+  background: white;
+  border-radius: 1.5rem;
+  padding: 2rem;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+.summary-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1e40af;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.5rem;
+}
+
+.summary-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 0.75rem;
+  border-left: 4px solid #667eea;
+}
+
+.summary-label {
+  font-weight: 500;
+  color: #4b5563;
+}
+
+.summary-value {
+  font-weight: 600;
+  color: #1e40af;
+}
+
+/* Simulation Styles */
+.connection-line.broken {
+  background: linear-gradient(90deg, #ef4444, #dc2626);
+  opacity: 0.3;
+  animation: none;
+}
+
+.transport-indicator.broken {
+  background: #fee2e2;
+  border: 2px solid #ef4444;
+  animation: none;
+}
+
+.transport-indicator.broken .transport-icon {
+  color: #ef4444;
+  opacity: 0.5;
+}
+
+.transport-indicator.broken .transport-label {
+  color: #ef4444;
+}
+
+.break-link-btn {
+  width: auto;
+  min-width: 4rem;
+  height: auto;
+  padding: 0.5rem;
+  border-radius: 1rem;
+  background: white;
+  border: 3px solid #ef4444;
+  color: #ef4444;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  z-index: 20;
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+  font-weight: bold;
+}
+
+.break-btn-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.break-btn-text {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.break-link-btn:hover {
+  background: #ef4444;
+  color: white;
+  transform: scale(1.2);
+  box-shadow: 0 6px 12px rgba(239, 68, 68, 0.3);
+}
+
+.break-link-btn.broken {
+  background: #ef4444;
+  color: white;
+  border-color: #dc2626;
+}
+
+.break-link-btn.broken:hover {
+  background: #dc2626;
+}
+
+/* Simulation Submit Section */
+.simulation-submit-section {
+  margin: 3rem 0;
+  padding: 2rem;
+  background: white;
+  border-radius: 1.5rem;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.simulation-info {
+  margin-bottom: 2rem;
+}
+
+.simulation-text {
+  font-size: 1.1rem;
+  color: #4b5563;
+  margin-bottom: 1rem;
+}
+
+.simulation-status {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.simulation-submit-btn {
+  padding: 1rem 2rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 0.75rem;
+  font-weight: 600;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+  box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
+}
+
+.simulation-submit-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 15px 35px rgba(102, 126, 234, 0.4);
+}
+
+.simulation-submit-btn:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .route-timeline {
+    flex-direction: column;
+    gap: 2rem;
+  }
+  
+  .route-connection {
+    height: 80px;
+    width: 100%;
+  }
+  
+  .connection-line {
+    width: 4px;
+    height: 100%;
+    left: 50%;
+    top: 0;
+    right: auto;
+    transform: translateX(-50%);
+  }
+  
+  .transport-indicator {
+    left: 50%;
+    top: 50%;
+  }
+  
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .break-link-btn {
+    width: 1.5rem;
+    height: 1.5rem;
+    top: -0.25rem;
+    right: -0.25rem;
+  }
+  
+  .break-link-btn svg {
+    width: 0.75rem;
+    height: 0.75rem;
+  }
+}

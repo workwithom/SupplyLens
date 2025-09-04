@@ -1,0 +1,196 @@
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes moveIcon {
+  from {
+    transform: translateX(0) translateY(-50%);
+  }
+
+  to {
+    transform: translateX(calc(100% - 32px)) translateY(-50%);
+  }
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes float {
+
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.checkpoint-box {
+  animation: slideIn 0.5s ease-out forwards;
+  opacity: 0;
+  transition: all 0.3s ease;
+}
+
+.checkpoint-box:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+.transport-connection {
+  position: relative;
+  padding: 1rem 0;
+  margin: 0.5rem 0;
+}
+
+.transport-line {
+  height: 3px;
+  background: linear-gradient(90deg, #f97316, #dc2626);
+  width: 100%;
+  position: relative;
+  border-radius: 2px;
+  box-shadow: 0 2px 4px rgba(249, 115, 22, 0.3);
+}
+
+.transport-icon {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  animation: moveIcon 3s linear infinite;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+
+.transport-icon svg {
+  width: 24px;
+  height: 24px;
+  color: #f97316;
+}
+
+.button-hover {
+  transition: all 0.3s ease;
+}
+
+.button-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+.checkpoint-box:nth-child(1) {
+  animation-delay: 0.1s;
+}
+
+.checkpoint-box:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.checkpoint-box:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.checkpoint-box:nth-child(4) {
+  animation-delay: 0.4s;
+}
+
+.checkpoint-box:nth-child(5) {
+  animation-delay: 0.5s;
+}
+
+/* Enhanced input focus effects */
+input:focus,
+select:focus {
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+}
+
+/* Floating animation for the hero section */
+.hero-section {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Enhanced button animations */
+.btn-primary {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+
+/* Checkpoint number badge animation */
+.checkpoint-number {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Transport mode selection enhancement */
+.transport-select {
+  transition: all 0.3s ease;
+}
+
+.transport-select:hover {
+  border-color: #f97316;
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.1);
+}
+
+/* Enhanced visual connection lines */
+.connection-line {
+  background: linear-gradient(180deg, #e5e7eb, #d1d5db);
+  position: relative;
+  overflow: hidden;
+}
+
+.connection-line::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, transparent, rgba(249, 115, 22, 0.3), transparent);
+  animation: shimmer 2s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateY(-100%);
+  }
+
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+  .checkpoint-box {
+    margin-bottom: 1rem;
+  }
+
+  .transport-line {
+    height: 2px;
+  }
+
+  .transport-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* Light theme enforced - no dark mode support */

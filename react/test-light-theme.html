@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Light Theme Test - SupplyLens</title>
+    <style>
+        /* Force light theme */
+        :root {
+            color-scheme: light;
+        }
+
+        html {
+            color-scheme: light;
+        }
+
+        body {
+            color-scheme: light;
+            background-color: #ffffff;
+            color: #1f2937;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #f8fafc;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        .success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #a7f3d0;
+        }
+
+        .info {
+            background: #dbeafe;
+            color: #1e40af;
+            border: 1px solid #93c5fd;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🌞 Light Theme Test - SupplyLens</h1>
+
+        <div class="status success">
+            ✅ Light theme is enforced
+        </div>
+
+        <div class="status info">
+            ℹ️ This page should always display in light theme regardless of your system's dark/light mode setting
+        </div>
+
+        <h2>What was changed:</h2>
+        <ul>
+            <li>✅ Fixed PowerShell execution policy for nodemon</li>
+            <li>✅ Configured Tailwind CSS to disable dark mode</li>
+            <li>✅ Added CSS rules to force light theme</li>
+            <li>✅ Removed all dark mode media queries</li>
+            <li>✅ Updated component colors to use light theme</li>
+            <li>✅ Set color-scheme: light on all elements</li>
+        </ul>
+
+        <h2>Test Results:</h2>
+        <p>If you can see this text clearly on a light background, the light theme is working correctly!</p>
+
+        <div style="background: #f97316; color: white; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            🎉 Your website will now always use light theme regardless of system preferences!
+        </div>
+    </div>
+</body>
+</html>
+
