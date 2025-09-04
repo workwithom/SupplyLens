@@ -1,6 +1,8 @@
+import API_URL from '../config/api';
+
 export async function handleGenerate(input) {
     try {
-        const response = await fetch("http://localhost:5000/api/generate", {
+        const response = await fetch(`${API_URL}/api/generate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ prompt: input }),
