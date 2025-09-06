@@ -137,25 +137,12 @@
   0% {
     transform: translateY(0) scale(1.5);
   }
-
-  20% {
-    transform: translateY(-8px) scale(1.51);
-  }
-
-  40% {
-    transform: translateY(0) scale(1.5);
-  }
-
-  60% {
-    transform: translateY(-4px) scale(1.51);
-  }
-
-  80% {
-    transform: translateY(0) scale(1.5);
+50% {
+    transform: translateY(-8px) scale(1.52);
   }
 
   100% {
-    transform: translateY(0) scale(1.51);
+    transform: translateY(0) scale(1.5);
   }
 }
 
