@@ -1,22 +1,51 @@
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { TransportIcons } from './TransportIcons';
 import { useEffect, useState } from 'react';
+import { getSupplyChain, getSupplyChains, toVisualizationSupplyChain } from '../services/supplyChainService';
 import './SupplyChainVisualization.css';
 
 const SupplyChainVisualization = () => {
-  const location = useLocation();
+  const { id } = useParams();
   const navigate = useNavigate();
-  const [isVisible, setIsVisible] = useState(false);
   const [isSimulationMode, setIsSimulationMode] = useState(false);
   const [brokenLinks, setBrokenLinks] = useState([]);
-  const supplyChainData = location.state?.supplyChainData;
+  const [supplyChainData, setSupplyChainData] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [disruptionDurationDays, setDisruptionDurationDays] = useState(1);
+  const [simulationError, setSimulationError] = useState('');
 
   useEffect(() => {
-    setIsVisible(true);
-  }, []);
+    if (!id) {
+      const loadDefaultChain = async () => {
+        try {
+          const chains = await getSupplyChains();
+          if (chains && chains.length > 0) {
+            navigate(`/supply-chain-visualization/${chains[0]._id}`, { replace: true });
+          } else {
+            setLoadError('No saved supply chains found. Create a supply chain to visualize routes.');
+          }
+        } catch {
+          setLoadError('Select or create a supply chain to view its route.');
+        }
+      };
+      loadDefaultChain();
+      return;
+    }
+
+    const loadSupplyChain = async () => {
+      try {
+        setLoadError('');
+        const supplyChain = await getSupplyChain(id);
+        setSupplyChainData(toVisualizationSupplyChain(supplyChain));
+      } catch (error) {
+        setLoadError(error.message || 'Unable to load supply chain.');
+      }
+    };
+
+    loadSupplyChain();
+  }, [id, navigate]);
 
   const toggleSimulationMode = () => {
-    console.log('Toggling simulation mode from:', isSimulationMode, 'to:', !isSimulationMode);
     setIsSimulationMode(!isSimulationMode);
     if (isSimulationMode) {
       setBrokenLinks([]);
@@ -24,26 +53,20 @@ const SupplyChainVisualization = () => {
   };
 
   const toggleLinkBreak = (fromIndex, toIndex) => {
-    console.log('Toggling link break for:', fromIndex, 'to:', toIndex);
-    console.log('Current broken links:', brokenLinks);
-    
     const linkKey = `${fromIndex}-${toIndex}`;
-    const existingIndex = brokenLinks.findIndex(link => link.key === linkKey);
-    
+    const existingIndex = brokenLinks.findIndex((link) => link.key === linkKey);
+
     if (existingIndex >= 0) {
-      // Remove from broken links
-      console.log('Removing link from broken links');
       setBrokenLinks(brokenLinks.filter((_, index) => index !== existingIndex));
     } else {
-      // Add to broken links
-      console.log('Adding link to broken links');
       const newBrokenLink = {
         key: linkKey,
+        routeId: supplyChainData.checkpoints[fromIndex].routeId,
         from: supplyChainData.checkpoints[fromIndex].location,
         to: supplyChainData.checkpoints[toIndex].location,
         transport: supplyChainData.checkpoints[fromIndex].transport_mode,
         fromIndex,
-        toIndex
+        toIndex,
       };
       setBrokenLinks([...brokenLinks, newBrokenLink]);
     }
@@ -51,29 +74,73 @@ const SupplyChainVisualization = () => {
 
   const isLinkBroken = (fromIndex, toIndex) => {
     const linkKey = `${fromIndex}-${toIndex}`;
-    return brokenLinks.some(link => link.key === linkKey);
+    return brokenLinks.some((link) => link.key === linkKey);
   };
 
   const handleSimulationSubmit = () => {
+    if (brokenLinks.length !== 1) {
+      setSimulationError('Select exactly one route for this route-failure simulation.');
+      return;
+    }
+
+    if (!brokenLinks[0].routeId) {
+      setSimulationError('The selected connection is not a saved route.');
+      return;
+    }
+
+    const duration = Number(disruptionDurationDays);
+    if (!Number.isFinite(duration) || duration < 0) {
+      setSimulationError('Enter a non-negative disruption duration in days.');
+      return;
+    }
+
+    setSimulationError('');
+    const simState = {
+      supplyChainId: id,
+      routeId: brokenLinks[0].routeId,
+      disruptionDurationDays: duration,
+      supplyChainData,
+      brokenLinks,
+    };
+
+    try {
+      sessionStorage.setItem('lastSimulation', JSON.stringify(simState));
+    } catch {
+      // ignore storage quota error
+    }
+
     navigate('/simulation-impact', {
-      state: {
-        supplyChainData: supplyChainData,
-        brokenLinks: brokenLinks
-      }
+      state: simState,
     });
   };
 
-  if (!supplyChainData) {
+  if (!supplyChainData && !loadError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-gray-600">Loading supply chain...</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">No supply chain data found</h2>
-          <button
-            onClick={() => navigate('/create-supply-chain')}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            Go Back
-          </button>
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">{loadError}</h2>
+          <div className="flex justify-center gap-3">
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800"
+            >
+              ← Dashboard
+            </button>
+            <button
+              onClick={() => navigate('/create-supply-chain')}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Create Supply Chain
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -84,15 +151,23 @@ const SupplyChainVisualization = () => {
       {/* Header */}
       <div className="text-center">
         <div className="flex items-center justify-between mb-8">
-          <button
-            onClick={() => navigate('/create-supply-chain')}
-            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            Back to Builder
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="inline-flex items-center px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm"
+            >
+              ← Dashboard
+            </button>
+            <button
+              onClick={() => navigate('/create-supply-chain')}
+              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
+            >
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              Builder
+            </button>
+          </div>
           <h1 className="text-4xl font-bold text-gray-900">
             Supply Chain Route Diagram
           </h1>
@@ -112,7 +187,7 @@ const SupplyChainVisualization = () => {
             </button>
             <button
               onClick={() => navigate('/create-supply-chain')}
-              className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
             >
               <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -251,6 +326,18 @@ const SupplyChainVisualization = () => {
             <p className="simulation-status">
               Broken Links: <span className="text-red-600 font-bold">{brokenLinks.length}</span>
             </p>
+            <label className="block mt-3 text-sm font-medium text-gray-700">
+              Disruption duration (days)
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={disruptionDurationDays}
+                onChange={(event) => setDisruptionDurationDays(event.target.value)}
+                className="ml-3 w-24 rounded border border-gray-300 px-2 py-1"
+              />
+            </label>
+            {simulationError && <p className="mt-2 text-red-600" role="alert">{simulationError}</p>}
           </div>
           <button
             onClick={handleSimulationSubmit}

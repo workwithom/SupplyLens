@@ -20,8 +20,14 @@ mongoose.connect(process.env.MONGO_URI)
         console.log("MongoDB connection error: ", err);
     });
 
+const allowedOrigins = [...new Set([
+    "https://supplylens.vercel.app",
+    "http://localhost:5173",
+    process.env.FRONTEND_URL,
+].filter(Boolean))];
+
 app.use(cors({
-    origin: process.env.FRONTEND_URL || "https://supplylens.vercel.app",
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));
@@ -29,6 +35,7 @@ app.use(express.json());
 app.use(cookieParser());
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY); // set your key in .env
+
 
 function fileToGenerativePart(path, mimeType) {
     return {
@@ -202,7 +209,9 @@ app.get('/weather', async (req, res) => {
 
 // Import and use auth routes
 import authRoutes from "./routes/authRoute.js";
+import supplyChainRoutes from "./routes/supplyChainRoute.js";
 app.use("/api/auth", authRoutes);
+app.use("/api/supply-chains", supplyChainRoutes);
 
 app.listen(PORT, () => {
     console.log(`Server running at http://localhost:${PORT}`);

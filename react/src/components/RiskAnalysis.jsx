@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-const RiskAnalysis = ({ data }) => {
+const RiskAnalysis = () => {
   const [inputJson, setInputJson] = useState('');
   const [parsedData, setParsedData] = useState(null);
   const [error, setError] = useState('');
@@ -10,7 +10,7 @@ const RiskAnalysis = ({ data }) => {
       const parsed = JSON.parse(inputJson);
       setParsedData(parsed);
       setError('');
-    } catch (err) {
+    } catch {
       setError('Invalid JSON format. Please check your input.');
       setParsedData(null);
     }

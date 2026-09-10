@@ -59,8 +59,8 @@ const Login = () => {
       // Dispatch storage event to notify other components
       window.dispatchEvent(new Event('storage'));
 
-      // Redirect to supply chain builder
-      navigate('/', { replace: true });
+      // Redirect to dashboard
+      navigate('/dashboard', { replace: true });
     } catch (err) {
       setError(err.message);
     }

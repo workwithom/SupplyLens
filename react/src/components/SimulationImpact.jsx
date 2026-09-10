@@ -1,818 +1,573 @@
-import { useLocation, useNavigate } from 'react-router-dom';
-import { TransportIcons } from './TransportIcons';
-import { useEffect, useState } from 'react';
-import { analyzeSupplyChainImpact } from '../services/groqService';
-import './SimulationImpact.css';
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { runRouteFailureSimulation } from "../services/supplyChainService";
+import "./SimulationImpact.css";
+
+// ─── Formatting helpers ────────────────────────────────────────────────────
+
+const formatDays = (value) =>
+  value === null || value === undefined
+    ? "Unavailable"
+    : `${value} day${value === 1 ? "" : "s"}`;
+
+const formatCostAbsolute = (value) =>
+  Number.isFinite(value) ? `₹${value.toLocaleString("en-IN")}` : "Unavailable";
+
+const getRiskBadgeClass = (riskLevel) => {
+  switch (riskLevel) {
+    case "CRITICAL": return "risk-badge risk-badge--critical";
+    case "HIGH":     return "risk-badge risk-badge--high";
+    case "MEDIUM":   return "risk-badge risk-badge--medium";
+    case "LOW":      return "risk-badge risk-badge--low";
+    default:         return "risk-badge risk-badge--unknown";
+  }
+};
+
+const getRiskColors = (riskLevel) => {
+  switch (riskLevel) {
+    case "CRITICAL":
+    case "HIGH":
+      return "bg-red-100 border-red-300 text-red-700";
+    case "MEDIUM":
+      return "bg-yellow-100 border-yellow-300 text-yellow-700";
+    case "LOW":
+      return "bg-green-100 border-green-300 text-green-700";
+    default:
+      return "bg-gray-100 border-gray-300 text-gray-700";
+  }
+};
+
+// ─── Sub-components ─────────────────────────────────────────────────────────
+
+/** Single metric row inside the impact summary card. */
+const MetricRow = ({ label, value, valueClass = "" }) => (
+  <div className="impact-metric">
+    <span className="metric-label">{label}</span>
+    <span className={`metric-value ${valueClass}`}>{value}</span>
+  </div>
+);
+
+/**
+ * Shows the disrupted route's node path (from → to).
+ * Falls back gracefully when brokenLinks state is absent (e.g. page refresh).
+ */
+const DisruptedRoutePath = ({ brokenLinks, disruptedRoute }) => {
+  if (brokenLinks && brokenLinks.length > 0) {
+    return brokenLinks.map((link) => (
+      <div key={link.key} className="broken-link-item">
+        <span className="link-from">{link.from}</span>
+        <span className="mx-3">→</span>
+        <span className="link-to">{link.to}</span>
+        <span className="ml-4 text-gray-500 font-medium">
+          {link.transport || disruptedRoute?.transportMode || ""}
+        </span>
+      </div>
+    ));
+  }
+  if (disruptedRoute) {
+    return (
+      <p className="text-gray-600">
+        Transport mode: <strong>{disruptedRoute.transportMode || "Unavailable"}</strong>
+      </p>
+    );
+  }
+  return <p className="text-gray-500 italic">Route details unavailable.</p>;
+};
+
+/** Stockout avoided badge — green ✓ / grey ✗ / grey "unavailable". */
+const StockoutAvoidedBadge = ({ value }) => {
+  if (value === null) {
+    return (
+      <span className="stockout-badge stockout-badge--unknown">
+        Stockout avoided: Data unavailable
+      </span>
+    );
+  }
+  if (value === true) {
+    return (
+      <span className="stockout-badge stockout-badge--yes">
+        ✓ Stockout avoided
+      </span>
+    );
+  }
+  return (
+    <span className="stockout-badge stockout-badge--no">
+      ✗ Stockout not avoided
+    </span>
+  );
+};
+
+/**
+ * Side-by-side tradeoff comparison card (original route vs alternative).
+ * Used in both the deterministic comparison section and the AI tradeoffs list.
+ */
+const TradeoffCard = ({ alt, disruptedRoute, index }) => {
+  const additionalCostSign = alt.additionalCost > 0 ? "+" : "";
+  const additionalCostClass =
+    alt.additionalCost > 0
+      ? "tradeoff-delta tradeoff-delta--worse"
+      : alt.additionalCost < 0
+      ? "tradeoff-delta tradeoff-delta--better"
+      : "tradeoff-delta tradeoff-delta--neutral";
+
+  const timeSavedClass =
+    alt.timeSaved > 0
+      ? "tradeoff-delta tradeoff-delta--better"
+      : alt.timeSaved < 0
+      ? "tradeoff-delta tradeoff-delta--worse"
+      : "tradeoff-delta tradeoff-delta--neutral";
+
+  const timeSavedLabel =
+    alt.timeSaved > 0
+      ? `${alt.timeSaved} day${alt.timeSaved === 1 ? "" : "s"} faster`
+      : alt.timeSaved < 0
+      ? `${Math.abs(alt.timeSaved)} day${Math.abs(alt.timeSaved) === 1 ? "" : "s"} slower`
+      : "Same transit time";
+
+  return (
+    <div className="tradeoff-card" key={alt.routeId || index}>
+      <div className="tradeoff-card__header">
+        <span className="mode-badge">{alt.transportMode || "Unknown mode"}</span>
+        <StockoutAvoidedBadge value={alt.stockoutAvoided} />
+      </div>
+
+      <div className="tradeoff-comparison">
+        <div className="tradeoff-col tradeoff-col--original">
+          <p className="tradeoff-col__label">Original route</p>
+          <div className="tradeoff-col__metrics">
+            <div className="tradeoff-stat">
+              <span className="tradeoff-stat__key">Transit</span>
+              <span className="tradeoff-stat__val">{formatDays(disruptedRoute?.transitDays ?? null)}</span>
+            </div>
+            <div className="tradeoff-stat">
+              <span className="tradeoff-stat__key">Cost</span>
+              <span className="tradeoff-stat__val">{formatCostAbsolute(disruptedRoute?.cost)}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="tradeoff-vs" aria-hidden="true">vs</div>
+
+        <div className="tradeoff-col tradeoff-col--alternative">
+          <p className="tradeoff-col__label">Alternative</p>
+          <div className="tradeoff-col__metrics">
+            <div className="tradeoff-stat">
+              <span className="tradeoff-stat__key">Transit</span>
+              <span className="tradeoff-stat__val">{formatDays(alt.transitDays)}</span>
+            </div>
+            <div className="tradeoff-stat">
+              <span className="tradeoff-stat__key">Cost</span>
+              <span className="tradeoff-stat__val">{formatCostAbsolute(alt.cost)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="tradeoff-deltas">
+        <div className={additionalCostClass}>
+          <span className="tradeoff-delta__key">Additional cost</span>
+          <span className="tradeoff-delta__val">
+            {Number.isFinite(alt.additionalCost)
+              ? `${additionalCostSign}₹${Math.abs(alt.additionalCost).toLocaleString("en-IN")}`
+              : "Unavailable"}
+          </span>
+        </div>
+        <div className={timeSavedClass}>
+          <span className="tradeoff-delta__key">Time saved</span>
+          <span className="tradeoff-delta__val">{timeSavedLabel}</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * AI Analysis section — summary, risk explanation, recommendations, tradeoffs.
+ * Includes a non-blocking "AI unavailable" notice when the fallback was used.
+ */
+const AiAnalysisSection = ({ analysis, aiAvailable }) => {
+  if (!analysis) return null;
+
+  return (
+    <section className="ai-analysis-section">
+      <div className="ai-analysis-card">
+        {/* Header with provider indicator */}
+        <div className="ai-analysis-header">
+          <h3 className="summary-title" style={{ marginBottom: 0 }}>AI Analysis</h3>
+          {aiAvailable ? (
+            <span className="ai-provider-badge ai-provider-badge--live">
+              ✦ Gemini AI
+            </span>
+          ) : (
+            <span className="ai-provider-badge ai-provider-badge--fallback">
+              ⚡ Deterministic fallback
+            </span>
+          )}
+        </div>
+
+        {/* Non-blocking unavailability notice */}
+        {!aiAvailable && (
+          <div className="ai-unavailable-notice" role="status">
+            <strong>AI explanation unavailable.</strong> The analysis below is generated from the
+            deterministic simulation data only. Connect the Gemini API key to enable AI-powered explanations.
+          </div>
+        )}
+
+        {/* Summary */}
+        <div className="ai-block">
+          <h4 className="ai-block__title">Summary</h4>
+          <p className="ai-block__body">{analysis.summary}</p>
+        </div>
+
+        {/* Risk Explanation */}
+        <div className="ai-block">
+          <h4 className="ai-block__title">Risk Explanation</h4>
+          <p className="ai-block__body">{analysis.riskExplanation}</p>
+        </div>
+
+        {/* Recommendations */}
+        {analysis.recommendations && analysis.recommendations.length > 0 && (
+          <div className="ai-block">
+            <h4 className="ai-block__title">Recommendations</h4>
+            <ol className="ai-list ai-list--ordered">
+              {analysis.recommendations.map((rec, i) => (
+                <li key={i} className="ai-list__item">{rec}</li>
+              ))}
+            </ol>
+          </div>
+        )}
+
+        {/* AI Tradeoffs */}
+        {analysis.tradeoffs && analysis.tradeoffs.length > 0 && (
+          <div className="ai-block">
+            <h4 className="ai-block__title">Tradeoffs</h4>
+            <ul className="ai-list ai-list--unordered">
+              {analysis.tradeoffs.map((tradeoff, i) => (
+                <li key={i} className="ai-list__item">{tradeoff}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <p className="ai-disclaimer">
+          AI analysis is explanatory only. All numerical values (coverage days, stockout, costs) come from the
+          deterministic simulation and are not modified by the AI. Always verify recommendations against your
+          operational context.
+        </p>
+      </div>
+    </section>
+  );
+};
+
+// ─── Main component ──────────────────────────────────────────────────────────
 
 const SimulationImpact = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const [isVisible, setIsVisible] = useState(false);
+  const [result, setResult] = useState(null);
+  const [alternatives, setAlternatives] = useState([]);
+  const [analysis, setAnalysis] = useState(null);
+  const [aiAvailable, setAiAvailable] = useState(false);
+  const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-  const [analysisData, setAnalysisData] = useState(null);
-  const { supplyChainData, brokenLinks } = location.state || {};
+
+  const [params] = useState(() => {
+    if (location.state?.supplyChainId && location.state?.routeId) {
+      return location.state;
+    }
+    try {
+      const stored = sessionStorage.getItem('lastSimulation');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch {
+      // ignore JSON parse error
+    }
+    return location.state || {};
+  });
+
+  const {
+    supplyChainId,
+    routeId,
+    disruptionDurationDays,
+    supplyChainData,
+    brokenLinks,
+  } = params;
 
   useEffect(() => {
-    setIsVisible(true);
+    if (!supplyChainId || !routeId || disruptionDurationDays === undefined) {
+      setError("No simulation data found. Select a saved route and duration first.");
+      setIsLoading(false);
+      return;
+    }
 
-    const performAnalysis = async () => {
-      if (supplyChainData && brokenLinks) {
-        try {
-          setIsLoading(true);
-          const analysis = await analyzeSupplyChainImpact(supplyChainData, brokenLinks);
-          setAnalysisData(analysis);
-        } catch (error) {
-          console.error('Error performing analysis:', error);
-          // Use fallback analysis
-          const fallbackAnalysis = {
-            impactAssessment: {
-              severity: "Medium",
-              overallImpact: "Supply chain disruption detected",
-              immediateEffects: ["Production delays", "Inventory shortages"],
-              longTermEffects: ["Customer dissatisfaction", "Revenue loss"],
-              financialImpact: "Significant financial impact expected",
-              operationalImpact: "Operational efficiency compromised"
-            },
-            problems: [
-              {
-                category: "Transportation",
-                description: "Transportation links broken",
-                severity: "High"
-              }
-            ],
-            recommendations: [
-              {
-                type: "Immediate",
-                action: "Activate backup suppliers",
-                priority: "High",
-                expectedOutcome: "Minimize disruption"
-              }
-            ],
-            alternativeRoutes: [],
-            riskMitigation: []
-          };
-          setAnalysisData(fallbackAnalysis);
-        } finally {
-          setIsLoading(false);
-        }
-      } else {
+    const runSimulation = async () => {
+      try {
+        setError("");
+        const simulationResponse = await runRouteFailureSimulation(supplyChainId, {
+          routeId,
+          disruptionDurationDays,
+        });
+        setResult(simulationResponse.result);
+        setAlternatives(simulationResponse.alternatives || []);
+        setAnalysis(simulationResponse.analysis || null);
+        setAiAvailable(simulationResponse.aiAvailable === true);
+      } catch (requestError) {
+        setError(requestError.message || "Unable to run the simulation.");
+      } finally {
         setIsLoading(false);
       }
     };
 
-    performAnalysis();
-  }, [supplyChainData, brokenLinks]);
+    runSimulation();
+  }, [supplyChainId, routeId, disruptionDurationDays]);
 
-  if (!supplyChainData || !brokenLinks) {
+  const handleExportJson = () => {
+    if (!result) return;
+    const reportData = {
+      title: "SupplyLens Simulation Impact Report",
+      generatedAt: new Date().toISOString(),
+      supplyChain: {
+        id: supplyChainId,
+        product: supplyChainData?.product || result.product?.name || "Unavailable",
+      },
+      disruption: result.disruption,
+      disruptedRoute: result.disruptedRoute,
+      deterministicImpact: {
+        riskLevel: result.riskLevel,
+        inventoryCoverageDays: result.inventoryCoverageDays,
+        stockoutDays: result.stockoutDays,
+        affectedNodes: result.affectedNodes,
+      },
+      alternativeRoutes: alternatives,
+      aiAnalysis: analysis,
+      aiAvailable,
+    };
+
+    const blob = new Blob([JSON.stringify(reportData, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `supplylens-simulation-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const visualizationPath = supplyChainId
+    ? `/supply-chain-visualization/${supplyChainId}`
+    : "/create-supply-chain";
+
+  // ── Loading ──────────────────────────────────────────────────────────────
+  if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">No simulation data found</h2>
-          <button
-            onClick={() => navigate('/supply-chain-visualization')}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            Go Back
-          </button>
+          <div className="loading-spinner mx-auto" />
+          <p className="text-gray-600 mt-4">Running simulation and AI analysis…</p>
         </div>
       </div>
     );
   }
 
-  // Calculate impact based on broken links
-  const calculateImpact = () => {
-    const totalSegments = supplyChainData.checkpoints.length - 1;
-    const brokenSegments = brokenLinks.length;
-    const impactPercentage = (brokenSegments / totalSegments) * 100;
-
-    let severity = 'Low';
-    if (impactPercentage > 50) severity = 'High';
-    else if (impactPercentage > 25) severity = 'Medium';
-
-    return {
-      totalSegments,
-      brokenSegments,
-      impactPercentage: Math.round(impactPercentage),
-      severity,
-      isChainBroken: brokenSegments >= totalSegments
-    };
-  };
-
-  const impact = calculateImpact();
-
-  // Use Groq analysis data if available, otherwise use calculated impact
-  const finalSeverity = analysisData?.impactAssessment?.severity || impact.severity;
-
-  const getImpactColor = (severity) => {
-    switch (severity) {
-      case 'High': return 'text-red-600';
-      case 'Medium': return 'text-yellow-600';
-      case 'Low': return 'text-green-600';
-      default: return 'text-gray-600';
-    }
-  };
-
-  const getImpactBgColor = (severity) => {
-    switch (severity) {
-      case 'High': return 'bg-red-100 border-red-300';
-      case 'Medium': return 'bg-yellow-100 border-yellow-300';
-      case 'Low': return 'bg-green-100 border-green-300';
-      default: return 'bg-gray-100 border-gray-300';
-    }
-  };
-
-  const exportReport = (format) => {
-    let content, filename, mimeType;
-
-    switch (format) {
-      case 'pdf':
-        // Create a print-friendly version and use browser print
-        const printWindow = window.open('', '_blank');
-        const printContent = `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <title>Supply Chain Impact Analysis Report</title>
-            <style>
-              body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
-              .header { text-align: center; border-bottom: 2px solid #f97316; padding-bottom: 20px; margin-bottom: 30px; }
-              .title { color: #f97316; font-size: 24px; margin-bottom: 10px; }
-              .timestamp { color: #6b7280; font-size: 14px; }
-              .section { margin-bottom: 25px; }
-              .section-title { color: #374151; font-size: 18px; margin-bottom: 15px; border-left: 4px solid #f97316; padding-left: 15px; }
-              .metric { background: #f9fafb; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-              .metric-title { font-weight: bold; color: #374151; margin-bottom: 5px; }
-              .broken-link { background: #fef2f2; border: 1px solid #fecaca; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
-              .broken-link-title { color: #dc2626; font-weight: bold; margin-bottom: 5px; }
-              .ai-analysis { background: #f0f9ff; border: 1px solid #bae6fd; padding: 20px; border-radius: 8px; }
-              .impact-level { display: inline-block; background: #f97316; color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; }
-              .recommendation { background: #f0fdf4; border: 1px solid #bbf7d0; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
-              .recommendation-title { color: #16a34a; font-weight: bold; margin-bottom: 5px; }
-              table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-              th, td { border: 1px solid #d1d5db; padding: 12px; text-align: left; }
-              th { background: #f9fafb; font-weight: bold; }
-              @media print { body { margin: 0; } .no-print { display: none; } }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <div class="title">Supply Chain Impact Analysis Report</div>
-              <div class="timestamp">Generated on: ${new Date().toLocaleString()}</div>
-            </div>
-
-            <div class="section">
-              <div class="section-title">Supply Chain Overview</div>
-              <div class="metric">
-                <div class="metric-title">Product</div>
-                <div>${supplyChainData.product}</div>
-              </div>
-              <div class="metric">
-                <div class="metric-title">Total Checkpoints</div>
-                <div>${supplyChainData.checkpoints.length}</div>
-              </div>
-              <div class="metric">
-                <div class="metric-title">Total Links</div>
-                <div>${supplyChainData.links.length}</div>
-              </div>
-            </div>
-
-            ${brokenLinks.length > 0 ? `
-              <div class="section">
-                <div class="section-title">Broken Links Analysis</div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>From</th>
-                      <th>To</th>
-                      <th>Transport</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${brokenLinks.map(link => `
-                      <tr>
-                        <td>${link.from}</td>
-                        <td>${link.to}</td>
-                        <td>${link.transport}</td>
-                        <td style="color: #dc2626; font-weight: bold;">BROKEN</td>
-                      </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
-              </div>
-            ` : ''}
-
-            ${analysisData?.impactAssessment?.overallImpact ? `
-              <div class="section">
-                <div class="section-title">AI Analysis Summary</div>
-                <div class="ai-analysis">
-                  <div style="margin-bottom: 15px;">
-                    <strong>Summary:</strong><br>
-                    ${analysisData.impactAssessment.overallImpact}
-                  </div>
-                  <div style="margin-bottom: 15px;">
-                    <strong>Impact Level:</strong>
-                    <span class="impact-level">${finalSeverity}</span>
-                  </div>
-                  ${analysisData.recommendations && analysisData.recommendations.length > 0 ? `
-                    <div style="margin-bottom: 15px;">
-                      <strong>Recommendations:</strong>
-                    </div>
-                    ${analysisData.recommendations.map((rec, index) => `
-                      <div class="recommendation">
-                        <div class="recommendation-title">Recommendation ${index + 1}</div>
-                        <div>${rec.action}</div>
-                      </div>
-                    `).join('')}
-                  ` : ''}
-                </div>
-              </div>
-            ` : ''}
-
-            <div class="no-print" style="text-align: center; margin-top: 40px; padding: 20px; background: #f3f4f6; border-radius: 8px;">
-              <p>Click the print button or press Ctrl+P to save as PDF</p>
-              <button onclick="window.print()" style="background: #f97316; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-top: 10px;">
-                Print / Save as PDF
-              </button>
-            </div>
-          </body>
-          </html>
-        `;
-
-        printWindow.document.write(printContent);
-        printWindow.document.close();
-        printWindow.focus();
-        return;
-
-      case 'csv':
-        // Create CSV content
-        let csvContent = 'Product,Checkpoint,Status,Transport,Impact\n';
-
-        // Add supply chain data
-        supplyChainData.checkpoints.forEach(checkpoint => {
-          csvContent += `${supplyChainData.product},${checkpoint.name},Active,,\n`;
-        });
-
-        // Add broken links
-        brokenLinks.forEach(link => {
-          csvContent += `${supplyChainData.product},${link.from} → ${link.to},Broken,${link.transport},High\n`;
-        });
-
-        // Add AI analysis if available
-        if (analysisData?.impactAssessment?.overallImpact) {
-          csvContent += `${supplyChainData.product},AI Analysis,${finalSeverity},,${finalSeverity}\n`;
-        }
-
-        // Create and download CSV
-        const csvBlob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const csvLink = document.createElement('a');
-        const csvUrl = URL.createObjectURL(csvBlob);
-        csvLink.setAttribute('href', csvUrl);
-        csvLink.setAttribute('download', 'supply-chain-impact-analysis.csv');
-        csvLink.style.visibility = 'hidden';
-        document.body.appendChild(csvLink);
-        csvLink.click();
-        document.body.removeChild(csvLink);
-        return;
-
-      case 'html':
-      default:
-        // Enhanced HTML export
-        let reportContent = `
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Supply Chain Impact Analysis Report</title>
-            <style>
-              body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
-              .header { text-align: center; border-bottom: 2px solid #f97316; padding-bottom: 20px; margin-bottom: 30px; }
-              .title { color: #f97316; font-size: 28px; margin-bottom: 10px; }
-              .timestamp { color: #6b7280; font-size: 14px; }
-              .section { margin-bottom: 30px; }
-              .section-title { color: #374151; font-size: 20px; margin-bottom: 15px; border-left: 4px solid #f97316; padding-left: 15px; }
-              .metric { background: #f9fafb; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-              .metric-title { font-weight: bold; color: #374151; margin-bottom: 5px; }
-              .broken-link { background: #fef2f2; border: 1px solid #fecaca; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
-              .broken-link-title { color: #dc2626; font-weight: bold; margin-bottom: 5px; }
-              .ai-analysis { background: #f0f9ff; border: 1px solid #bae6fd; padding: 20px; border-radius: 8px; }
-              .impact-level { display: inline-block; background: #f97316; color: white; padding: 5px 15px; border-radius: 20px; font-weight: bold; }
-              .recommendation { background: #f0fdf4; border: 1px solid #bbf7d0; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
-              .recommendation-title { color: #16a34a; font-weight: bold; margin-bottom: 5px; }
-              table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-              th, td { border: 1px solid #d1d5db; padding: 12px; text-align: left; }
-              th { background: #f9fafb; font-weight: bold; }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <div class="title">Supply Chain Impact Analysis Report</div>
-              <div class="timestamp">Generated on: ${new Date().toLocaleString()}</div>
-            </div>
-        `;
-
-        // Add supply chain overview
-        reportContent += `
-          <div class="section">
-            <div class="section-title">Supply Chain Overview</div>
-            <div class="metric">
-              <div class="metric-title">Product</div>
-              <div>${supplyChainData.product}</div>
-            </div>
-            <div class="metric">
-              <div class="metric-title">Total Checkpoints</div>
-              <div>${supplyChainData.checkpoints.length}</div>
-            </div>
-            <div class="metric">
-              <div class="metric-title">Total Links</div>
-              <div>${supplyChainData.links.length}</div>
-            </div>
-          </div>
-        `;
-
-        // Add broken links analysis
-        if (brokenLinks.length > 0) {
-          reportContent += `
-            <div class="section">
-              <div class="section-title">Broken Links Analysis</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>From</th>
-                    <th>To</th>
-                    <th>Transport</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-          `;
-
-          brokenLinks.forEach(link => {
-            reportContent += `
-              <tr>
-                <td>${link.from}</td>
-                <td>${link.to}</td>
-                <td>${link.transport}</td>
-                <td style="color: #dc2626; font-weight: bold;">BROKEN</td>
-              </tr>
-            `;
-          });
-
-          reportContent += `
-                </tbody>
-              </table>
-            </div>
-          `;
-        }
-
-        // Add AI analysis if available
-        if (analysisData?.impactAssessment?.overallImpact) {
-          reportContent += `
-            <div class="section">
-              <div class="section-title">AI Analysis Summary</div>
-              <div class="ai-analysis">
-                <div style="margin-bottom: 15px;">
-                  <strong>Summary:</strong><br>
-                  ${analysisData.impactAssessment.overallImpact}
-                </div>
-                <div style="margin-bottom: 15px;">
-                  <strong>Impact Level:</strong>
-                  <span class="impact-level">${finalSeverity}</span>
-                </div>
-          `;
-
-          if (analysisData.recommendations && analysisData.recommendations.length > 0) {
-            reportContent += `
-              <div style="margin-bottom: 15px;">
-                <strong>Recommendations:</strong>
-              </div>
-            `;
-
-            analysisData.recommendations.forEach((rec, index) => {
-              reportContent += `
-                <div class="recommendation">
-                  <div class="recommendation-title">Recommendation ${index + 1}</div>
-                  <div>${rec.action}</div>
-                </div>
-              `;
-            });
-          }
-
-          reportContent += `
-              </div>
-            </div>
-          `;
-        }
-
-        // Close HTML
-        reportContent += `
-          </body>
-          </html>
-        `;
-
-        // Create and download HTML file
-        const blob = new Blob([reportContent], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'supply-chain-impact-analysis.html';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        break;
-    }
-  };
-
-  if (isLoading) {
+  // ── Error ────────────────────────────────────────────────────────────────
+  if (error) {
     return (
-      <div className="simulation-impact-container">
-        <div className="text-center">
-          <div className="loading-container">
-            <div className="loading-spinner"></div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Analyzing Supply Chain Impact...</h2>
-            <p className="text-gray-600">Using AI to generate detailed analysis and recommendations</p>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center max-w-md p-8 bg-white rounded-xl shadow-lg">
+          <h2 className="mb-4 text-2xl font-bold text-gray-900">Simulation Unavailable</h2>
+          <p className="mb-6 text-red-600 text-sm" role="alert">{error}</p>
+          <div className="flex justify-center gap-3">
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="rounded-lg bg-gray-700 px-4 py-2 text-white hover:bg-gray-800 text-sm font-medium"
+            >
+              ← Dashboard
+            </button>
+            <button
+              onClick={() => navigate(visualizationPath)}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 text-sm font-medium"
+            >
+              Back to Visualization
+            </button>
           </div>
         </div>
       </div>
     );
   }
 
+  // ── Derived values ───────────────────────────────────────────────────────
+  const riskColors = getRiskColors(result.riskLevel);
+  const affectedNodeNames = result.affectedNodes.map((node) => node.location || node.name);
+  const disruptedRoute = result.disruptedRoute;
+
+  // ── Render ───────────────────────────────────────────────────────────────
   return (
-    <div className="simulation-impact-container">
-      {/* Header */}
+    <div className="supply-chain-container">
+
+      {/* ── Page header ── */}
       <div className="text-center">
-        <div className="flex items-center justify-between mb-8">
-          <button
-            onClick={() => navigate('/supply-chain-visualization')}
-            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            Back to Visualization
-          </button>
-          <h1 className="text-4xl font-bold text-gray-900">
-            Simulation Impact Analysis
-          </h1>
-          <button
-            onClick={() => navigate('/create-supply-chain')}
-            className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-          >
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            New Supply Chain
-          </button>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-12">
-          <h2 className="text-2xl font-bold text-blue-600">Product: {supplyChainData.product}</h2>
-          <p className="text-gray-600 mt-2">Simulation Results</p>
-        </div>
-      </div>
-
-      {/* Impact Summary */}
-      <div className="impact-summary-section">
-        <div className={`impact-summary-card ${getImpactBgColor(finalSeverity)}`}>
-          <h3 className="text-2xl font-bold mb-4">AI-Powered Impact Assessment</h3>
-          <div className="impact-metrics">
-            <div className="impact-metric">
-              <span className="metric-label">Total Segments:</span>
-              <span className="metric-value">{impact.totalSegments}</span>
-            </div>
-            <div className="impact-metric">
-              <span className="metric-label">Broken Segments:</span>
-              <span className="metric-value text-red-600">{impact.brokenSegments}</span>
-            </div>
-            <div className="impact-metric">
-              <span className="metric-label">AI Impact Level:</span>
-              <span className={`metric-value ${getImpactColor(finalSeverity)}`}>
-                {finalSeverity}
-              </span>
-            </div>
-            <div className="impact-metric">
-              <span className="metric-label">Chain Status:</span>
-              <span className={`metric-value ${impact.isChainBroken ? 'text-red-600' : 'text-green-600'}`}>
-                {impact.isChainBroken ? 'BROKEN' : 'OPERATIONAL'}
-              </span>
-            </div>
-          </div>
-          {analysisData?.impactAssessment?.overallImpact && (
-            <div className="ai-overall-impact">
-              <h4 className="text-lg font-semibold mb-2">AI Analysis Summary:</h4>
-              <p className="text-gray-700">{analysisData.impactAssessment.overallImpact}</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Broken Links Details */}
-      <div className="broken-links-section">
-        <div className="broken-links-card">
-          <h3 className="text-xl font-bold mb-4">Broken Links Details</h3>
-          <div className="broken-links-list">
-            {brokenLinks.map((link, index) => (
-              <div key={index} className="broken-link-item">
-                <div className="broken-link-info">
-                  <span className="link-from">{link.from}</span>
-                  <div className="link-arrow">
-                    <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                    </svg>
-                  </div>
-                  <span className="link-to">{link.to}</span>
-                </div>
-                <div className="link-transport">
-                  <span className="transport-label">{link.transport}</span>
-                  <svg className="transport-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* AI-Generated Problems */}
-      {analysisData?.problems && analysisData.problems.length > 0 && (
-        <div className="problems-section">
-          <div className="problems-card">
-            <h3 className="text-xl font-bold mb-4">AI Agent-Identified Problems</h3>
-            <div className="problems-list">
-              {analysisData.problems.map((problem, index) => (
-                <div key={index} className={`problem-item ${problem.severity.toLowerCase()}-priority`}>
-                  <div className="problem-header">
-                    <span className="problem-category">{problem.category}</span>
-                    <span className={`problem-severity ${problem.severity.toLowerCase()}`}>
-                      {problem.severity}
-                    </span>
-                  </div>
-                  <p className="problem-description">{problem.description}</p>
-                  {problem.rootCause && (
-                    <p className="problem-root-cause"><strong>Root Cause:</strong> {problem.rootCause}</p>
-                  )}
-                  {problem.affectedAreas && problem.affectedAreas.length > 0 && (
-                    <div className="problem-affected-areas">
-                      <strong>Affected Areas:</strong>
-                      <div className="affected-areas-tags">
-                        {problem.affectedAreas.map((area, areaIndex) => (
-                          <span key={areaIndex} className="affected-area-tag">{area}</span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* AI-Generated Recommendations */}
-      {analysisData?.recommendations && analysisData.recommendations.length > 0 && (
-        <div className="recommendations-section">
-          <div className="recommendations-card">
-            <h3 className="text-xl font-bold mb-4">AI-Agent's Recommendations</h3>
-            <div className="recommendations-list">
-              {analysisData.recommendations.map((rec, index) => (
-                <div key={index} className={`recommendation-item ${rec.priority.toLowerCase()}-priority`}>
-                  <div className="recommendation-header">
-                    <span className="recommendation-type">{rec.type}</span>
-                    <span className={`recommendation-priority ${rec.priority.toLowerCase()}`}>
-                      {rec.priority}
-                    </span>
-                  </div>
-                  <div className="recommendation-content">
-                    <p className="recommendation-action"><strong>Action:</strong> {rec.action}</p>
-                    <p className="recommendation-outcome"><strong>Expected Outcome:</strong> {rec.expectedOutcome}</p>
-                    {rec.implementationSteps && rec.implementationSteps.length > 0 && (
-                      <div className="implementation-steps">
-                        <strong>Implementation Steps:</strong>
-                        <ol className="steps-list">
-                          {rec.implementationSteps.map((step, stepIndex) => (
-                            <li key={stepIndex} className="step-item">{step}</li>
-                          ))}
-                        </ol>
-                      </div>
-                    )}
-                    {rec.resourceRequirements && (
-                      <p className="resource-requirements"><strong>Resources Needed:</strong> {rec.resourceRequirements}</p>
-                    )}
-                    {rec.timeline && (
-                      <p className="timeline"><strong>Timeline:</strong> {rec.timeline}</p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Recovery Plan */}
-      {analysisData?.recoveryPlan && (
-        <div className="recovery-plan-section">
-          <div className="recovery-plan-card">
-            <h3 className="text-xl font-bold mb-4">Recovery Plan</h3>
-            <div className="recovery-plan-content">
-              {analysisData.recoveryPlan.immediateActions && (
-                <div className="recovery-phase">
-                  <h4 className="phase-title">Immediate Actions (0-24 hours)</h4>
-                  <ul className="action-list">
-                    {analysisData.recoveryPlan.immediateActions.map((action, index) => (
-                      <li key={index} className="action-item">{action}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {analysisData.recoveryPlan.shortTermGoals && (
-                <div className="recovery-phase">
-                  <h4 className="phase-title">Short-term Goals (1-7 days)</h4>
-                  <ul className="action-list">
-                    {analysisData.recoveryPlan.shortTermGoals.map((goal, index) => (
-                      <li key={index} className="action-item">{goal}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {analysisData.recoveryPlan.longTermGoals && (
-                <div className="recovery-phase">
-                  <h4 className="phase-title">Long-term Goals (1-6 months)</h4>
-                  <ul className="action-list">
-                    {analysisData.recoveryPlan.longTermGoals.map((goal, index) => (
-                      <li key={index} className="action-item">{goal}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {analysisData.recoveryPlan.successMetrics && (
-                <div className="recovery-phase">
-                  <h4 className="phase-title">Success Metrics</h4>
-                  <ul className="action-list">
-                    {analysisData.recoveryPlan.successMetrics.map((metric, index) => (
-                      <li key={index} className="action-item">{metric}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Supply Chain Resilience Analysis */}
-      {analysisData?.supplyChainResilience && (
-        <div className="resilience-section">
-          <div className="resilience-card">
-            <h3 className="text-xl font-bold mb-4">Supply Chain Resilience Analysis</h3>
-            <div className="resilience-content">
-              <div className="resilience-score">
-                <h4 className="score-title">Current Resilience Level</h4>
-                <div className={`resilience-indicator ${analysisData.supplyChainResilience.currentResilience.toLowerCase()}`}>
-                  {analysisData.supplyChainResilience.currentResilience}
-                </div>
-              </div>
-
-              {analysisData.supplyChainResilience.improvementAreas && (
-                <div className="resilience-area">
-                  <h4 className="area-title">Areas for Improvement</h4>
-                  <ul className="improvement-list">
-                    {analysisData.supplyChainResilience.improvementAreas.map((area, index) => (
-                      <li key={index} className="improvement-item">{area}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {analysisData.supplyChainResilience.bestPractices && (
-                <div className="resilience-area">
-                  <h4 className="area-title">Best Practices</h4>
-                  <ul className="best-practices-list">
-                    {analysisData.supplyChainResilience.bestPractices.map((practice, index) => (
-                      <li key={index} className="practice-item">{practice}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {analysisData.supplyChainResilience.technologyRecommendations && (
-                <div className="resilience-area">
-                  <h4 className="area-title">Technology Recommendations</h4>
-                  <ul className="tech-recommendations-list">
-                    {analysisData.supplyChainResilience.technologyRecommendations.map((tech, index) => (
-                      <li key={index} className="tech-item">{tech}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Alternative Routes */}
-      {analysisData?.alternativeRoutes && analysisData.alternativeRoutes.length > 0 && (
-        <div className="alternative-routes-section">
-          <div className="alternative-routes-card">
-            <h3 className="text-xl font-bold mb-4">Alternative Routes Analysis</h3>
-            <div className="alternative-routes-list">
-              {analysisData.alternativeRoutes.map((route, index) => (
-                <div key={index} className="alternative-route-item">
-                  <h4 className="route-description">{route.description}</h4>
-                  <div className="route-details">
-                    <span className={`route-feasibility ${route.feasibility.toLowerCase()}`}>
-                      Feasibility: {route.feasibility}
-                    </span>
-                    <span className="route-time">Time Impact: {route.timeImpact}</span>
-                    <span className="route-cost">Cost Impact: {route.costImpact}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Risk Mitigation Strategies */}
-      {analysisData?.riskMitigation && analysisData.riskMitigation.length > 0 && (
-        <div className="risk-mitigation-section">
-          <div className="risk-mitigation-card">
-            <h3 className="text-xl font-bold mb-4">Risk Mitigation Strategies</h3>
-            <div className="risk-mitigation-list">
-              {analysisData.riskMitigation.map((strategy, index) => (
-                <div key={index} className="risk-mitigation-item">
-                  <h4 className="strategy-name">{strategy.strategy}</h4>
-                  <p className="strategy-implementation"><strong>Implementation:</strong> {strategy.implementation}</p>
-                  <p className="strategy-timeline"><strong>Timeline:</strong> {strategy.timeline}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Export Section */}
-      <div className="export-section">
-        <div className="export-card">
-          <h3 className="text-xl font-semibold text-gray-900 mb-4">Export Analysis Report</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="mb-8 flex items-center justify-between flex-wrap gap-4 no-print">
+          <div className="flex gap-2">
             <button
-              onClick={() => exportReport('pdf')}
-              className="export-button bg-red-600 hover:bg-red-700 text-white"
+              onClick={() => navigate('/dashboard')}
+              className="rounded-lg bg-gray-700 px-4 py-2 text-white hover:bg-gray-800 text-sm font-medium"
             >
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              Export as PDF
+              ← Dashboard
             </button>
-
             <button
-              onClick={() => exportReport('csv')}
-              className="export-button bg-green-600 hover:bg-green-700 text-white"
+              onClick={() => navigate(visualizationPath)}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 text-sm font-medium"
             >
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              Export as CSV
-            </button>
-
-            <button
-              onClick={() => exportReport('html')}
-              className="export-button bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              Export as HTML
+              Visualization
             </button>
           </div>
-          <p className="text-sm text-gray-600 mt-3 text-center">
-            Choose your preferred format to download the complete analysis report
+          <h1 className="text-3xl lg:text-4xl font-bold text-gray-900">Simulation Impact Analysis</h1>
+          <div className="flex gap-2">
+            <button
+              onClick={handleExportJson}
+              className="rounded-lg bg-indigo-600 px-3 py-2 text-white hover:bg-indigo-700 text-sm font-medium flex items-center gap-1.5"
+              title="Download JSON Report"
+            >
+              <span>📥</span>
+              <span>Export JSON</span>
+            </button>
+            <button
+              onClick={handlePrint}
+              className="rounded-lg bg-gray-600 px-3 py-2 text-white hover:bg-gray-700 text-sm font-medium flex items-center gap-1.5"
+              title="Print / Save as PDF"
+            >
+              <span>🖨️</span>
+              <span>Print / PDF</span>
+            </button>
+            <button
+              onClick={() => navigate("/create-supply-chain")}
+              className="rounded-lg bg-green-600 px-3 py-2 text-white hover:bg-green-700 text-sm font-medium"
+            >
+              New Chain
+            </button>
+          </div>
+        </div>
+        <div className="mb-12 rounded-xl bg-white p-6 shadow-lg">
+          <h2 className="text-2xl font-bold text-blue-600">
+            Product: {supplyChainData?.product || result.product?.name || "Unavailable"}
+          </h2>
+          <p className="mt-2 text-gray-500 text-sm">
+            Deterministic route-failure simulation — numerical results are calculated from saved supply-chain data.
+            AI explanation is additive and does not modify these values.
           </p>
         </div>
       </div>
 
-      {/* Action Buttons */}
-      <div className="action-buttons-section">
-        <button
-          onClick={() => navigate('/supply-chain-visualization')}
-          className="action-button secondary"
-        >
-          Run Another Simulation
-        </button>
-        <button
-          onClick={() => navigate('/create-supply-chain')}
-          className="action-button primary"
-        >
-          Create New Supply Chain
-        </button>
-      </div>
+      {/* ── Section 1: Risk Impact Summary ── */}
+      <section className="impact-summary-section">
+        <div className={`impact-summary-card border ${riskColors}`}>
+          <div className="flex items-center gap-3 mb-4">
+            <h3 className="text-2xl font-bold">Risk Level:</h3>
+            <span className={getRiskBadgeClass(result.riskLevel)}>{result.riskLevel}</span>
+          </div>
+          <div className="impact-metrics">
+            <MetricRow label="Disruption type" value="ROUTE_FAILURE" />
+            <MetricRow label="Duration" value={formatDays(result.disruption.durationDays)} />
+            <MetricRow label="Inventory coverage" value={formatDays(result.inventoryCoverageDays)} />
+            <MetricRow
+              label="Projected stockout"
+              value={formatDays(result.stockoutDays)}
+              valueClass={result.stockoutDays > 0 ? "text-red-700 font-bold" : ""}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ── Section 2: Disrupted Route ── */}
+      <section className="broken-links-section">
+        <div className="broken-links-card">
+          <h3 className="mb-4 text-xl font-bold">Disrupted Route</h3>
+          <DisruptedRoutePath brokenLinks={brokenLinks} disruptedRoute={disruptedRoute} />
+          {disruptedRoute && (
+            <div className="mt-4 flex flex-wrap gap-6 text-sm text-gray-600">
+              {disruptedRoute.transitDays != null && (
+                <span className="route-time">
+                  Transit: <strong>{formatDays(disruptedRoute.transitDays)}</strong>
+                </span>
+              )}
+              {disruptedRoute.cost != null && (
+                <span className="route-cost">
+                  Cost: <strong>{formatCostAbsolute(disruptedRoute.cost)}</strong>
+                </span>
+              )}
+              {disruptedRoute.capacityPerDay != null && (
+                <span className="route-time">
+                  Capacity: <strong>{disruptedRoute.capacityPerDay.toLocaleString("en-IN")} units/day</strong>
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ── Section 3: Affected Downstream Nodes ── */}
+      <section className="summary-section">
+        <div className="summary-card">
+          <h3 className="summary-title">Affected Downstream Nodes</h3>
+          {affectedNodeNames.length > 0 ? (
+            <ul className="mt-4 list-inside list-disc text-gray-700">
+              {affectedNodeNames.map((name, index) => (
+                <li key={`${name}-${index}`}>{name}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-4 text-gray-500 italic">
+              No downstream nodes could be resolved from this route.
+            </p>
+          )}
+        </div>
+      </section>
+
+      {/* ── Section 4: Alternative Routes — Tradeoff Comparison ── */}
+      <section className="alternative-routes-section">
+        <div className="alternative-routes-card">
+          <h3 className="summary-title">Alternative Routes — Tradeoff Comparison</h3>
+          <p className="mt-1 mb-4 text-sm text-gray-500">
+            Routes connecting the same source and destination as the disrupted route, with transit and cost data available.
+            Deterministic calculations based on saved supply-chain data.
+          </p>
+
+          {alternatives.length === 0 ? (
+            <div className="alternative-route-item">
+              <p className="route-description text-gray-500">No alternative routes found.</p>
+              <p className="mt-1 text-sm text-gray-400">
+                To see alternatives, add a second route between the same two nodes with transit days and cost set in the supply chain builder.
+              </p>
+            </div>
+          ) : (
+            <div className="alternative-routes-list">
+              {alternatives.map((alt, index) => (
+                <TradeoffCard
+                  key={alt.routeId || index}
+                  alt={alt}
+                  disruptedRoute={disruptedRoute}
+                  index={index}
+                />
+              ))}
+            </div>
+          )}
+
+          <p className="mt-6 text-xs text-gray-400">
+            * Stockout avoided means the alternative can restore supply before inventory runs out based on
+            the configured transit time and disruption duration — not an AI prediction.
+          </p>
+        </div>
+      </section>
+
+      {/* ── Section 5: AI Analysis ── */}
+      <AiAnalysisSection analysis={analysis} aiAvailable={aiAvailable} />
+
     </div>
   );
 };

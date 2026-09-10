@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getdata } from './data';
 import Chatbot from './Chatbot';
 import { TransportIcons } from './TransportIcons';
+import { createSupplyChain, createSupplyChainPayload } from '../services/supplyChainService';
 import './SupplyChainBuilder.css';
 
 const SupplyChainBuilder = () => {
@@ -18,6 +18,8 @@ const SupplyChainBuilder = () => {
 
   const [productName, setProductName] = useState('');
   const [isChatbotOpen, setIsChatbotOpen] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const [checkpoints, setCheckpoints] = useState([
     {
       id: 1,
@@ -49,36 +51,6 @@ const SupplyChainBuilder = () => {
     ));
   };
 
-  function parseAIResponse(rawResponse) {
-    if (!rawResponse) return null;
-
-    // Remove variable assignment like "jsonData =" or "const data =" at the start
-    let cleaned = rawResponse.replace(/^\s*(const|let|var)?\s*\w+\s*=\s*/, '');
-
-    // Remove triple backticks ``` or ```json
-    cleaned = cleaned.replace(/^```json\s*/, '')
-      .replace(/^```/, '')
-      .replace(/```$/, '');
-
-    // Trim whitespace
-    cleaned = cleaned.trim();
-
-    // Extract JSON part (from first { to last })
-    const firstBrace = cleaned.indexOf('{');
-    const lastBrace = cleaned.lastIndexOf('}');
-    if (firstBrace === -1 || lastBrace === -1) return null;
-
-    cleaned = cleaned.slice(firstBrace, lastBrace + 1);
-
-    // Parse into JavaScript object
-    try {
-      return JSON.parse(cleaned);
-    } catch (err) {
-      console.error("Failed to parse JSON:", err);
-      return null;
-    }
-  }
-
   const handleSubmit = async () => {
     if (!productName.trim()) {
       alert('Please enter a product name');
@@ -90,32 +62,17 @@ const SupplyChainBuilder = () => {
       return;
     }
 
-    const supplyChainData = {
-      product: productName,
-      checkpoints: checkpoints.map((cp, index) => {
-        const checkpointData = {
-          location: cp.location,
-          product_state: cp.product_state,
-        };
-        if (index > 0) {
-          checkpointData.transport_mode = cp.transport_mode;
-        }
-        return checkpointData;
-      })
-    };
-
     try {
-      let t = await getdata(supplyChainData);
-      let final = parseAIResponse(t);
-      console.log(final);
-
-      // Navigate to visualization page with the supply chain data
-      navigate('/supply-chain-visualization', {
-        state: { supplyChainData: supplyChainData }
-      });
+      setIsSaving(true);
+      setSaveError('');
+      const payload = createSupplyChainPayload({ productName, checkpoints });
+      const { supplyChain } = await createSupplyChain(payload);
+      navigate(`/supply-chain-visualization/${supplyChain._id}`);
     } catch (error) {
       console.error('Error creating supply chain:', error);
-      alert('Error creating supply chain. Please try again.');
+      setSaveError(error.message || 'Error creating supply chain. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -124,12 +81,12 @@ const SupplyChainBuilder = () => {
   const currentSupplyChainData = {
     product: productName,
     checkpoints: checkpoints.map((cp, index) => {
-      const checkpointData = {
-        location: cp.location,
-        product_state: cp.product_state,
-      };
-      if (index > 0) {
-        checkpointData.transport_mode = cp.transport_mode;
+        const checkpointData = {
+          location: cp.location,
+          product_state: cp.product_state,
+        };
+        if (index < checkpoints.length - 1) {
+          checkpointData.transport_mode = cp.transport_mode;
       }
       return checkpointData;
     })
@@ -178,19 +135,6 @@ const SupplyChainBuilder = () => {
       </div>
     </div>
   );
-
-  const TransportConnection = ({ mode, index }) => {
-    const TransportIcon = TransportIcons[mode];
-    return (
-      <div className="transport-connection flex items-center justify-center py-4">
-        <div className="transport-line">
-          <div className="transport-icon">
-            {TransportIcon && <TransportIcon />}
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -376,15 +320,19 @@ const SupplyChainBuilder = () => {
 
         {/* Submit Button */}
         <div className="text-center">
+          {saveError && (
+            <p className="mb-4 text-red-600" role="alert">{saveError}</p>
+          )}
           <button
             onClick={handleSubmit}
+            disabled={isSaving}
             className="px-12 py-4 bg-gradient-to-r from-orange-500 to-red-500 text-white text-xl font-semibold rounded-full hover:shadow-2xl transform hover:-translate-y-2 transition-all duration-300 shadow-lg"
           >
             <span className="flex items-center justify-center">
               <svg className="w-6 h-6 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
               </svg>
-              Create Supply Chain
+              {isSaving ? 'Saving Supply Chain...' : 'Create Supply Chain'}
             </span>
           </button>
         </div>
