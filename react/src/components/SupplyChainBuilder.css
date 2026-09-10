@@ -193,4 +193,21 @@ select:focus {
   }
 }
 
+/* Route Connector Card */
+.route-connector-box {
+  animation: slideIn 0.5s ease-out forwards;
+  background: linear-gradient(135deg, rgba(255, 247, 237, 0.85), rgba(254, 243, 199, 0.55));
+  border: 2px dashed #fdba74;
+  border-radius: 1rem;
+  padding: 1.5rem;
+  margin: 1.5rem 0;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.route-connector-box:hover {
+  border-color: #f97316;
+  box-shadow: 0 10px 15px -3px rgba(249, 115, 22, 0.12);
+}
+
 /* Light theme enforced - no dark mode support */

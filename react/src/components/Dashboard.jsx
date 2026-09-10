@@ -505,7 +505,9 @@ const Dashboard = () => {
                             ? 'bg-red-100 text-red-700'
                             : sim.riskLevel === 'MEDIUM'
                             ? 'bg-yellow-100 text-yellow-700'
-                            : 'bg-green-100 text-green-700'
+                            : sim.riskLevel === 'LOW'
+                            ? 'bg-green-100 text-green-700'
+                            : 'bg-gray-100 text-gray-700'
                         }`}
                       >
                         {sim.riskLevel}
@@ -514,9 +516,11 @@ const Dashboard = () => {
                     <div className="text-xs text-gray-500 flex justify-between">
                       <span>{sim.transportMode} · {sim.disruptionDurationDays}d disruption</span>
                       <span>
-                        {sim.stockoutDays != null && sim.stockoutDays > 0
-                          ? `${sim.stockoutDays}d stockout`
-                          : 'No stockout'}
+                        {sim.stockoutDays != null
+                          ? sim.stockoutDays > 0
+                            ? `${sim.stockoutDays}d stockout`
+                            : 'No stockout'
+                          : 'Demand n/a'}
                       </span>
                     </div>
                   </div>

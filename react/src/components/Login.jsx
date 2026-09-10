@@ -5,11 +5,12 @@ import API_URL from '../config/api';
 const Login = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
-    email: 'JohnDoe@gmail.com',
-    password: '••••••••',
+    email: '',
+    password: '',
   });
   const [error, setError] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     const checkAuth = () => {
@@ -34,9 +35,11 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isLoading) return;
     setError('');
 
     try {
+      setIsLoading(true);
       const response = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: {
@@ -63,6 +66,8 @@ const Login = () => {
       navigate('/dashboard', { replace: true });
     } catch (err) {
       setError(err.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -205,8 +210,9 @@ const Login = () => {
                 <input
                   type="email"
                   name="email"
-                  
+                  value={formData.email}
                   onChange={handleChange}
+                  required
                   className="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-full text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-pink-500/50 focus:border-transparent"
                   placeholder="Enter your email"
                 />
@@ -218,8 +224,9 @@ const Login = () => {
                 <input
                   type="password"
                   name="password"
-
+                  value={formData.password}
                   onChange={handleChange}
+                  required
                   className="w-full px-4 py-3 bg-black/50 border border-white/20 rounded-full text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-pink-500/50 focus:border-transparent"
                   placeholder="Enter your password"
                 />
@@ -237,9 +244,10 @@ const Login = () => {
               {/* Sign In Button */}
               <button
                 type="submit"
-                className="w-full py-3 px-6 bg-gradient-to-r from-pink-500 to-orange-500 text-white font-semibold rounded-full hover:from-pink-600 hover:to-orange-600 transition-all duration-300 transform hover:scale-105"
+                disabled={isLoading}
+                className="w-full py-3 px-6 bg-gradient-to-r from-pink-500 to-orange-500 text-white font-semibold rounded-full hover:from-pink-600 hover:to-orange-600 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
               >
-                Sign in
+                {isLoading ? 'Signing in…' : 'Sign in'}
               </button>
 
               {/* Social Login */}

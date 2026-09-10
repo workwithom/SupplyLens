@@ -444,3 +444,55 @@
     height: 0.75rem;
   }
 }
+
+/* Node Metadata & Badges */
+.node-metadata {
+  margin-top: 0.35rem;
+}
+
+.node-name-text {
+  font-size: 0.825rem;
+  color: #e0e7ff;
+  margin: 0 0 0.35rem 0;
+  font-weight: 500;
+}
+
+.node-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.node-type-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: white;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.node-cap-badge {
+  background: rgba(0, 0, 0, 0.2);
+  color: #f3f4f6;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  font-size: 0.65rem;
+  font-weight: 500;
+}
+
+.route-metrics-badge {
+  font-size: 0.65rem;
+  color: #bfdbfe;
+  font-weight: normal;
+  margin-left: 0.25rem;
+}
+
+.transport-indicator.unconfigured {
+  border: 2px dashed #9ca3af;
+  background: #f3f4f6;
+}
+

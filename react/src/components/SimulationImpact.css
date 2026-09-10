@@ -998,6 +998,12 @@
   border: 1.5px solid #e5e7eb;
 }
 
+.stockout-badge--neutral {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1.5px solid #bfdbfe;
+}
+
 /* ── Tradeoff card ──────────────────────────────────────────────────────── */
 
 .tradeoff-card {

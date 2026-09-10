@@ -23,7 +23,7 @@ function App() {
           <Route path="/supply-chain-visualization" element={<PrivateRoute><SupplyChainVisualization /></PrivateRoute>} />
           <Route path="/supply-chain-visualization/:id" element={<PrivateRoute><SupplyChainVisualization /></PrivateRoute>} />
           <Route path="/simulation-impact" element={<PrivateRoute><SimulationImpact /></PrivateRoute>} />
-          <Route path="/risk-analysis" element={<RiskAnalysisPage />} />
+          <Route path="/risk-analysis" element={<PrivateRoute><RiskAnalysisPage /></PrivateRoute>} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<SignUp />} />
         </Routes>
