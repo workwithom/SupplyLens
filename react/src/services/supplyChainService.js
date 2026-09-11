@@ -184,7 +184,6 @@ export const createSupplyChainPayload = (input) => {
     name = "",
     description = "",
     product = {},
-    checkpoints = [],
     routes = [],
   } = input;
 
@@ -197,7 +196,13 @@ export const createSupplyChainPayload = (input) => {
     throw new Error("A product name is required.");
   }
 
-  if (!Array.isArray(checkpoints) || checkpoints.length < 2) {
+  const checkpoints = Array.isArray(input.checkpoints)
+    ? input.checkpoints
+    : Array.isArray(input.nodes)
+    ? input.nodes
+    : [];
+
+  if (checkpoints.length < 2) {
     throw new Error("At least 2 checkpoints are required to configure a supply chain.");
   }
 
@@ -242,52 +247,117 @@ export const createSupplyChainPayload = (input) => {
     return nodeDoc;
   });
 
-  const inventoryDocs = checkpoints.map((cp, index) => ({
-    productId,
-    nodeId: nodeDocs[index]._id,
-    quantity: parseRequiredNonNegativeNumber(
-      cp.inventoryQuantity,
-      `Checkpoint ${index + 1} inventory quantity`
-    ),
-  }));
-
-  if (!Array.isArray(routes) || routes.length < checkpoints.length - 1) {
-    throw new Error(
-      `Expected ${checkpoints.length - 1} routes connecting adjacent checkpoints, but received ${routes?.length || 0}.`
-    );
-  }
-
-  const routeDocs = checkpoints.slice(0, -1).map((_, index) => {
-    const route = routes[index];
-    if (!route || typeof route !== "object") {
-      throw new Error(`Route ${index + 1} configuration is missing.`);
-    }
-
-    const routeDoc = {
-      _id: ensureStableId(route._id),
-      sourceNodeId: nodeDocs[index]._id,
-      destinationNodeId: nodeDocs[index + 1]._id,
-      transportMode: canonicalTransportMode(route.transportMode, index),
-      transitDays: parseRequiredNonNegativeNumber(
-        route.transitDays,
-        `Route ${index + 1} transit days`
-      ),
-      cost: parseRequiredNonNegativeNumber(
-        route.cost,
-        `Route ${index + 1} cost`
+  const inventoryDocs = checkpoints.map((cp, index) => {
+    const rawQty = cp.inventoryQuantity !== undefined
+      ? cp.inventoryQuantity
+      : cp.inventory !== undefined
+      ? cp.inventory
+      : "0";
+    return {
+      productId,
+      nodeId: nodeDocs[index]._id,
+      quantity: parseRequiredNonNegativeNumber(
+        rawQty,
+        `Checkpoint ${index + 1} inventory quantity`
       ),
     };
+  });
 
-    const parsedCapacityPerDay = parseOptionalNonNegativeNumber(
-      route.capacityPerDay,
-      `Route ${index + 1} capacity per day`
-    );
-    if (parsedCapacityPerDay !== undefined) {
-      routeDoc.capacityPerDay = parsedCapacityPerDay;
+  if (!Array.isArray(routes) || routes.length === 0) {
+    throw new Error("At least one transport route is required to configure a supply chain.");
+  }
+
+  const nodeIdsSet = new Set(nodeDocs.map((n) => String(n._id)));
+  const hasExplicitEndpoints = routes.some(
+    (r) => r && (r.sourceNodeId !== undefined || r.destinationNodeId !== undefined)
+  );
+
+  let routeDocs = [];
+
+  if (hasExplicitEndpoints) {
+    routeDocs = routes.map((route, index) => {
+      if (!route || typeof route !== "object") {
+        throw new Error(`Route ${index + 1} configuration is missing.`);
+      }
+
+      const sourceId = String(route.sourceNodeId || "");
+      const destId = String(route.destinationNodeId || "");
+
+      if (!sourceId || !nodeIdsSet.has(sourceId)) {
+        throw new Error(`Route ${index + 1} source node is invalid or not selected.`);
+      }
+      if (!destId || !nodeIdsSet.has(destId)) {
+        throw new Error(`Route ${index + 1} destination node is invalid or not selected.`);
+      }
+      if (sourceId === destId) {
+        throw new Error(`Route ${index + 1} source and destination nodes cannot be the same.`);
+      }
+
+      const routeDoc = {
+        _id: ensureStableId(route._id),
+        sourceNodeId: sourceId,
+        destinationNodeId: destId,
+        transportMode: canonicalTransportMode(route.transportMode, index),
+        transitDays: parseRequiredNonNegativeNumber(
+          route.transitDays,
+          `Route ${index + 1} transit days`
+        ),
+        cost: parseRequiredNonNegativeNumber(
+          route.cost,
+          `Route ${index + 1} cost`
+        ),
+      };
+
+      const parsedCapacityPerDay = parseOptionalNonNegativeNumber(
+        route.capacityPerDay,
+        `Route ${index + 1} capacity per day`
+      );
+      if (parsedCapacityPerDay !== undefined) {
+        routeDoc.capacityPerDay = parsedCapacityPerDay;
+      }
+
+      return routeDoc;
+    });
+  } else {
+    // Legacy fallback: adjacent checkpoint routes
+    if (routes.length < checkpoints.length - 1) {
+      throw new Error(
+        `Expected ${checkpoints.length - 1} routes connecting adjacent checkpoints, but received ${routes?.length || 0}.`
+      );
     }
 
-    return routeDoc;
-  });
+    routeDocs = checkpoints.slice(0, -1).map((_, index) => {
+      const route = routes[index];
+      if (!route || typeof route !== "object") {
+        throw new Error(`Route ${index + 1} configuration is missing.`);
+      }
+
+      const routeDoc = {
+        _id: ensureStableId(route._id),
+        sourceNodeId: nodeDocs[index]._id,
+        destinationNodeId: nodeDocs[index + 1]._id,
+        transportMode: canonicalTransportMode(route.transportMode, index),
+        transitDays: parseRequiredNonNegativeNumber(
+          route.transitDays,
+          `Route ${index + 1} transit days`
+        ),
+        cost: parseRequiredNonNegativeNumber(
+          route.cost,
+          `Route ${index + 1} cost`
+        ),
+      };
+
+      const parsedCapacityPerDay = parseOptionalNonNegativeNumber(
+        route.capacityPerDay,
+        `Route ${index + 1} capacity per day`
+      );
+      if (parsedCapacityPerDay !== undefined) {
+        routeDoc.capacityPerDay = parsedCapacityPerDay;
+      }
+
+      return routeDoc;
+    });
+  }
 
   const payload = {
     name: trimmedName,

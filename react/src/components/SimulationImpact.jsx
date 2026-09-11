@@ -1,98 +1,59 @@
-import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
-import { runRouteFailureSimulation } from "../services/supplyChainService";
-import "./SimulationImpact.css";
+import { useEffect, useState, useMemo } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { runRouteFailureSimulation, getSupplyChain } from '../services/supplyChainService.js';
+import './SimulationImpact.css';
 
-// ─── Formatting helpers ────────────────────────────────────────────────────
+// ─── Value Formatters ────────────────────────────────────────────────────────
 
-const formatDays = (value) =>
-  value === null || value === undefined
-    ? "Unavailable"
-    : `${value} day${value === 1 ? "" : "s"}`;
-
-const formatCostAbsolute = (value) =>
-  Number.isFinite(value) ? `₹${value.toLocaleString("en-IN")}` : "Unavailable";
-
-const getRiskBadgeClass = (riskLevel) => {
-  switch (riskLevel) {
-    case "CRITICAL": return "risk-badge risk-badge--critical";
-    case "HIGH":     return "risk-badge risk-badge--high";
-    case "MEDIUM":   return "risk-badge risk-badge--medium";
-    case "LOW":      return "risk-badge risk-badge--low";
-    default:         return "risk-badge risk-badge--unknown";
-  }
+const formatDays = (value) => {
+  if (value === null || value === undefined) return 'Unavailable';
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 'Unavailable';
+  return `${Number.isInteger(num) ? num : Number(num.toFixed(1))} day${num === 1 ? '' : 's'}`;
 };
 
-const getRiskColors = (riskLevel) => {
+const formatCost = (value) => {
+  if (value === null || value === undefined) return 'Unavailable';
+  const num = Number(value);
+  return Number.isFinite(num) ? `₹${num.toLocaleString('en-IN')}` : 'Unavailable';
+};
+
+const getRiskClass = (riskLevel) => {
   switch (riskLevel) {
-    case "CRITICAL":
-    case "HIGH":
-      return "bg-red-100 border-red-300 text-red-700";
-    case "MEDIUM":
-      return "bg-yellow-100 border-yellow-300 text-yellow-700";
-    case "LOW":
-      return "bg-green-100 border-green-300 text-green-700";
+    case 'CRITICAL':
+      return 'risk-badge risk-badge--critical';
+    case 'HIGH':
+      return 'risk-badge risk-badge--high';
+    case 'MEDIUM':
+      return 'risk-badge risk-badge--medium';
+    case 'LOW':
+      return 'risk-badge risk-badge--low';
     default:
-      return "bg-gray-100 border-gray-300 text-gray-700";
+      return 'risk-badge risk-badge--unknown';
   }
 };
 
-// ─── Sub-components ─────────────────────────────────────────────────────────
-
-/** Single metric row inside the impact summary card. */
-const MetricRow = ({ label, value, valueClass = "", subtitle = "" }) => (
-  <div className="impact-metric">
-    <div className="flex flex-col">
-      <span className="metric-label">{label}</span>
-      {subtitle && <span className="text-xs text-gray-500 font-normal mt-0.5">{subtitle}</span>}
-    </div>
-    <span className={`metric-value ${valueClass}`}>{value}</span>
-  </div>
-);
-
-/**
- * Shows the disrupted route's node path (from → to).
- * Falls back gracefully when brokenLinks state is absent (e.g. page refresh).
- */
-const DisruptedRoutePath = ({ brokenLinks, disruptedRoute, supplyChain }) => {
-  if (brokenLinks && brokenLinks.length > 0) {
-    return brokenLinks.map((link) => (
-      <div key={link.key || link.routeId} className="broken-link-item">
-        <span className="link-from">{link.from}</span>
-        <span className="mx-3">→</span>
-        <span className="link-to">{link.to}</span>
-        <span className="ml-4 text-gray-500 font-medium">
-          {link.transport || disruptedRoute?.transportMode || ""}
-        </span>
-      </div>
-    ));
+const getMetricCardModifier = (riskLevel) => {
+  switch (riskLevel) {
+    case 'CRITICAL':
+      return 'metric-card--critical';
+    case 'HIGH':
+      return 'metric-card--high';
+    case 'MEDIUM':
+      return 'metric-card--medium';
+    case 'LOW':
+      return 'metric-card--low';
+    default:
+      return 'metric-card--unknown';
   }
-  if (disruptedRoute) {
-    const nodes = supplyChain?.nodes || [];
-    const sourceNode = nodes.find((n) => String(n._id) === String(disruptedRoute.sourceNodeId));
-    const destNode = nodes.find((n) => String(n._id) === String(disruptedRoute.destinationNodeId));
-    const fromName = sourceNode?.location || sourceNode?.name || "Source Node";
-    const destName = destNode?.location || destNode?.name || "Destination Node";
-
-    return (
-      <div className="broken-link-item">
-        <span className="link-from">{fromName}</span>
-        <span className="mx-3">→</span>
-        <span className="link-to">{destName}</span>
-        <span className="ml-4 text-gray-500 font-medium">
-          {disruptedRoute.transportMode || "Unavailable"}
-        </span>
-      </div>
-    );
-  }
-  return <p className="text-gray-500 italic">Route details unavailable.</p>;
 };
 
-/** Stockout avoided badge — green ✓ / grey ✗ / grey "unavailable". */
+// ─── Subcomponents ──────────────────────────────────────────────────────────
+
 const StockoutAvoidedBadge = ({ value, stockoutDays }) => {
-  if (value === null) {
+  if (value === null || value === undefined) {
     return (
-      <span className="stockout-badge stockout-badge--unknown" title="Daily demand or inventory is not defined to compute stockout avoidance">
+      <span className="stockout-badge stockout-badge--unknown" title="Demand or inventory data not configured">
         Stockout Avoidance: Data unavailable
       </span>
     );
@@ -106,216 +67,32 @@ const StockoutAvoidedBadge = ({ value, stockoutDays }) => {
   }
   if (value === true) {
     return (
-      <span className="stockout-badge stockout-badge--yes" title="Alternative restores supply before inventory depletes">
+      <span className="stockout-badge stockout-badge--yes" title="Alternative transit time restores supply before inventory buffer exhausts">
         ✓ Avoids stockout
       </span>
     );
   }
   return (
-    <span className="stockout-badge stockout-badge--no" title="Alternative transit time exceeds inventory buffer">
+    <span className="stockout-badge stockout-badge--no" title="Alternative transit time exceeds available inventory buffer">
       ✗ Does not avoid stockout
     </span>
   );
 };
 
-/**
- * Side-by-side tradeoff comparison card (original route vs alternative).
- * Used in both the deterministic comparison section and the AI tradeoffs list.
- */
-const TradeoffCard = ({ alt, disruptedRoute, stockoutDays, index }) => {
-  const additionalCostClass =
-    alt.additionalCost > 0
-      ? "tradeoff-delta tradeoff-delta--worse"
-      : alt.additionalCost < 0
-      ? "tradeoff-delta tradeoff-delta--better"
-      : "tradeoff-delta tradeoff-delta--neutral";
-
-  const additionalCostLabel =
-    Number.isFinite(alt.additionalCost)
-      ? alt.additionalCost > 0
-        ? `+₹${Math.abs(alt.additionalCost).toLocaleString("en-IN")} (higher cost)`
-        : alt.additionalCost < 0
-        ? `-₹${Math.abs(alt.additionalCost).toLocaleString("en-IN")} (cost savings)`
-        : "₹0 (same cost)"
-      : "Unavailable";
-
-  const timeSavedClass =
-    alt.timeSaved > 0
-      ? "tradeoff-delta tradeoff-delta--better"
-      : alt.timeSaved < 0
-      ? "tradeoff-delta tradeoff-delta--worse"
-      : "tradeoff-delta tradeoff-delta--neutral";
-
-  const timeSavedLabel =
-    Number.isFinite(alt.timeSaved)
-      ? alt.timeSaved > 0
-        ? `${alt.timeSaved} day${alt.timeSaved === 1 ? "" : "s"} faster`
-        : alt.timeSaved < 0
-        ? `${Math.abs(alt.timeSaved)} day${Math.abs(alt.timeSaved) === 1 ? "" : "s"} slower`
-        : "Same transit time (0 days)"
-      : "Unavailable";
-
-  return (
-    <div className="tradeoff-card" key={alt.routeId || index}>
-      <div className="tradeoff-card__header">
-        <span className="text-sm font-semibold text-gray-700 mr-1">
-          Alternative Route Option #{index + 1}:
-        </span>
-        <span className="mode-badge">{alt.transportMode || "Alternative Mode"}</span>
-        <StockoutAvoidedBadge value={alt.stockoutAvoided} stockoutDays={stockoutDays} />
-      </div>
-
-      <div className="tradeoff-comparison">
-        <div className="tradeoff-col tradeoff-col--original">
-          <p className="tradeoff-col__label">Original Disrupted Route</p>
-          <div className="tradeoff-col__metrics">
-            <div className="tradeoff-stat">
-              <span className="tradeoff-stat__key">Transit time</span>
-              <span className="tradeoff-stat__val">{formatDays(disruptedRoute?.transitDays ?? null)}</span>
-            </div>
-            <div className="tradeoff-stat">
-              <span className="tradeoff-stat__key">Transport cost</span>
-              <span className="tradeoff-stat__val">{formatCostAbsolute(disruptedRoute?.cost)}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="tradeoff-vs" aria-hidden="true">vs</div>
-
-        <div className="tradeoff-col tradeoff-col--alternative">
-          <p className="tradeoff-col__label">Alternative Route</p>
-          <div className="tradeoff-col__metrics">
-            <div className="tradeoff-stat">
-              <span className="tradeoff-stat__key">Transit time</span>
-              <span className="tradeoff-stat__val">{formatDays(alt.transitDays)}</span>
-            </div>
-            <div className="tradeoff-stat">
-              <span className="tradeoff-stat__key">Transport cost</span>
-              <span className="tradeoff-stat__val">{formatCostAbsolute(alt.cost)}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="tradeoff-deltas">
-        <div className={additionalCostClass}>
-          <span className="tradeoff-delta__key">Additional cost vs original:</span>
-          <span className="tradeoff-delta__val">{additionalCostLabel}</span>
-        </div>
-        <div className={timeSavedClass}>
-          <span className="tradeoff-delta__key">Time saved vs original:</span>
-          <span className="tradeoff-delta__val">{timeSavedLabel}</span>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/**
- * AI Analysis section — summary, risk explanation, recommendations, tradeoffs.
- * Includes a non-blocking "AI unavailable" notice when the fallback was used.
- */
-const AiAnalysisSection = ({ analysis, aiAvailable }) => {
-  if (!analysis) {
-    return (
-      <section className="ai-analysis-section">
-        <div className="ai-analysis-card">
-          <div className="ai-analysis-header">
-            <h3 className="summary-title" style={{ marginBottom: 0 }}>AI Analysis</h3>
-            <span className="ai-provider-badge ai-provider-badge--fallback">
-              Unavailable
-            </span>
-          </div>
-          <p className="text-gray-500 text-sm mt-3">
-            AI explanatory analysis is currently unavailable. All numerical risk metrics, inventory coverage, and alternative route comparisons above are computed deterministically from saved supply chain data.
-          </p>
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section className="ai-analysis-section">
-      <div className="ai-analysis-card">
-        {/* Header with provider indicator */}
-        <div className="ai-analysis-header">
-          <h3 className="summary-title" style={{ marginBottom: 0 }}>AI Analysis</h3>
-          {aiAvailable ? (
-            <span className="ai-provider-badge ai-provider-badge--live">
-              ✦ Gemini AI
-            </span>
-          ) : (
-            <span className="ai-provider-badge ai-provider-badge--fallback">
-              ⚡ Deterministic fallback
-            </span>
-          )}
-        </div>
-
-        {/* Non-blocking unavailability notice */}
-        {!aiAvailable && (
-          <div className="ai-unavailable-notice" role="status">
-            <strong>AI explanation unavailable.</strong> The analysis below is generated from deterministic simulation data only. Connect a Gemini API key to enable live AI-powered explanations.
-          </div>
-        )}
-
-        {/* Summary */}
-        <div className="ai-block">
-          <h4 className="ai-block__title">Summary</h4>
-          <p className="ai-block__body">{analysis.summary}</p>
-        </div>
-
-        {/* Risk Explanation */}
-        <div className="ai-block">
-          <h4 className="ai-block__title">Risk Explanation</h4>
-          <p className="ai-block__body">{analysis.riskExplanation}</p>
-        </div>
-
-        {/* Recommendations */}
-        {analysis.recommendations && analysis.recommendations.length > 0 && (
-          <div className="ai-block">
-            <h4 className="ai-block__title">Recommendations</h4>
-            <ol className="ai-list ai-list--ordered">
-              {analysis.recommendations.map((rec, i) => (
-                <li key={i} className="ai-list__item">{rec}</li>
-              ))}
-            </ol>
-          </div>
-        )}
-
-        {/* AI Tradeoffs */}
-        {analysis.tradeoffs && analysis.tradeoffs.length > 0 && (
-          <div className="ai-block">
-            <h4 className="ai-block__title">Tradeoffs</h4>
-            <ul className="ai-list ai-list--unordered">
-              {analysis.tradeoffs.map((tradeoff, i) => (
-                <li key={i} className="ai-list__item">{tradeoff}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <p className="ai-disclaimer">
-          AI analysis is explanatory only. All numerical values (coverage days, stockout, costs) come from the
-          deterministic simulation and are not modified by the AI. Always verify recommendations against your
-          operational context.
-        </p>
-      </div>
-    </section>
-  );
-};
-
-// ─── Main component ──────────────────────────────────────────────────────────
+// ─── Main Component ──────────────────────────────────────────────────────────
 
 const SimulationImpact = () => {
   const location = useLocation();
   const navigate = useNavigate();
+
   const [result, setResult] = useState(null);
   const [alternatives, setAlternatives] = useState([]);
   const [analysis, setAnalysis] = useState(null);
   const [aiAvailable, setAiAvailable] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
+  // Parse navigation state or fallback to sessionStorage
   const [params] = useState(() => {
     if (location.state?.supplyChainId && location.state?.routeId) {
       return location.state;
@@ -326,7 +103,7 @@ const SimulationImpact = () => {
         return JSON.parse(stored);
       }
     } catch {
-      // ignore JSON parse error
+      // ignore storage parsing error
     }
     return location.state || {};
   });
@@ -335,68 +112,151 @@ const SimulationImpact = () => {
     supplyChainId,
     routeId,
     disruptionDurationDays,
-    supplyChain,
-    supplyChainData,
-    brokenLinks,
+    supplyChain: initialSupplyChain,
   } = params;
 
+  const [chain, setChain] = useState(initialSupplyChain || null);
+
+  // Load full supply chain data if missing (e.g. direct refresh or from RiskAnalysis)
+  useEffect(() => {
+    if (!chain && supplyChainId) {
+      getSupplyChain(supplyChainId)
+        .then((data) => setChain(data))
+        .catch(() => {
+          // non-blocking: network topology view will degrade gracefully to result.affectedNodes
+        });
+    }
+  }, [chain, supplyChainId]);
+
+  // Execute simulation on mount
   useEffect(() => {
     if (!supplyChainId || !routeId || disruptionDurationDays === undefined) {
-      setError("No simulation data found. Select a saved route and duration first.");
+      setError('No simulation parameters found. Please select a route and disruption duration from the visualization or risk analysis page.');
       setIsLoading(false);
       return;
     }
 
-    const runSimulation = async () => {
+    let isMounted = true;
+
+    const runSim = async () => {
       try {
-        setError("");
-        const simulationResponse = await runRouteFailureSimulation(supplyChainId, {
+        setError('');
+        const response = await runRouteFailureSimulation(supplyChainId, {
           routeId,
           disruptionDurationDays: Number(disruptionDurationDays),
         });
-        setResult(simulationResponse.result);
-        setAlternatives(simulationResponse.alternatives || []);
-        setAnalysis(simulationResponse.analysis || null);
-        setAiAvailable(simulationResponse.aiAvailable === true);
-      } catch (requestError) {
-        setError(requestError.message || "Unable to run the simulation.");
+        if (isMounted) {
+          setResult(response.result);
+          setAlternatives(response.alternatives || []);
+          setAnalysis(response.analysis || null);
+          setAiAvailable(response.aiAvailable === true);
+        }
+      } catch (err) {
+        if (isMounted) {
+          setError(err.message || 'Unable to execute route failure simulation.');
+        }
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
-    runSimulation();
+    runSim();
+
+    return () => {
+      isMounted = false;
+    };
   }, [supplyChainId, routeId, disruptionDurationDays]);
+
+  // ── Derived Values ─────────────────────────────────────────────────────────
+
+  const disruptedRoute = result?.disruptedRoute;
+  const nodes = useMemo(() => chain?.nodes || [], [chain]);
+  const routes = useMemo(() => chain?.routes || [], [chain]);
+
+  const sourceNode = useMemo(() => {
+    if (!disruptedRoute) return null;
+    return nodes.find((n) => String(n._id) === String(disruptedRoute.sourceNodeId)) || null;
+  }, [nodes, disruptedRoute]);
+
+  const destNode = useMemo(() => {
+    if (!disruptedRoute) return null;
+    return nodes.find((n) => String(n._id) === String(disruptedRoute.destinationNodeId)) || null;
+  }, [nodes, disruptedRoute]);
+
+  const fromName = sourceNode?.location || sourceNode?.name || 'Source Node';
+  const destName = destNode?.location || destNode?.name || 'Destination Node';
+
+  const productName =
+    result?.product?.name ||
+    chain?.products?.[0]?.name ||
+    'Primary Product';
+  const productSku = result?.product?.sku || chain?.products?.[0]?.sku || '';
+  const productCriticality = result?.product?.criticality || chain?.products?.[0]?.criticality || 'MEDIUM';
+
+  const durationDays = result?.disruption?.durationDays ?? Number(disruptionDurationDays ?? 0);
+  const coverageDays = result?.inventoryCoverageDays;
+  const stockoutDays = result?.stockoutDays;
+  const riskLevel = result?.riskLevel || 'UNKNOWN';
+  const affectedNodes = result?.affectedNodes || [];
+
+  // Identify recommended alternative
+  const recommendedAltIndex = useMemo(() => {
+    if (!alternatives || alternatives.length === 0) return -1;
+    // 1. Look for alternative that avoids stockout
+    const avoidsIndex = alternatives.findIndex((alt) => alt.stockoutAvoided === true);
+    if (avoidsIndex !== -1) return avoidsIndex;
+    // 2. Otherwise lowest additional cost
+    let lowestCostIdx = 0;
+    for (let i = 1; i < alternatives.length; i++) {
+      if ((alternatives[i].additionalCost ?? Infinity) < (alternatives[lowestCostIdx].additionalCost ?? Infinity)) {
+        lowestCostIdx = i;
+      }
+    }
+    return lowestCostIdx;
+  }, [alternatives]);
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
 
   const handleExportJson = () => {
     if (!result) return;
     const reportData = {
-      title: "SupplyLens Simulation Impact Report",
+      title: 'SupplyLens Simulation Impact Report',
       generatedAt: new Date().toISOString(),
       supplyChain: {
         id: supplyChainId,
-        product: result.product?.name || supplyChain?.products?.[0]?.name || supplyChainData?.product || "Unavailable",
+        name: chain?.name || 'Supply Chain',
+        product: productName,
+        sku: productSku,
+        criticality: productCriticality,
       },
       disruption: result.disruption,
       disruptedRoute: result.disruptedRoute,
       deterministicImpact: {
         riskLevel: result.riskLevel,
-        inventoryCoverageDays: result.inventoryCoverageDays,
-        stockoutDays: result.stockoutDays,
+        disruptionDurationDays: durationDays,
+        inventoryCoverageDays: coverageDays,
+        stockoutDays: stockoutDays,
         affectedNodes: result.affectedNodes,
       },
-      alternativeRoutes: alternatives,
-      aiAnalysis: analysis,
-      aiAvailable,
+      recoveryOptions: alternatives,
+      decisionSupport: {
+        summary: analysis?.summary,
+        riskExplanation: analysis?.riskExplanation,
+        recommendations: analysis?.recommendations,
+        tradeoffs: analysis?.tradeoffs,
+        aiAvailable,
+      },
     };
 
     const blob = new Blob([JSON.stringify(reportData, null, 2)], {
-      type: "application/json",
+      type: 'application/json',
     });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
+    const link = document.createElement('a');
     link.href = url;
-    link.download = `supplylens-simulation-${Date.now()}.json`;
+    link.download = `supplylens-disruption-${supplyChainId}-${Date.now()}.json`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -407,37 +267,47 @@ const SimulationImpact = () => {
 
   const visualizationPath = supplyChainId
     ? `/supply-chain-visualization/${supplyChainId}`
-    : "/create-supply-chain";
+    : '/create-supply-chain';
 
-  // ── Loading ──────────────────────────────────────────────────────────────
+  // ── Loading View ───────────────────────────────────────────────────────────
+
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="loading-spinner mx-auto" />
-          <p className="text-gray-600 mt-4">Running simulation and AI analysis…</p>
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm text-center max-w-sm w-full">
+          <div className="w-10 h-10 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4" />
+          <h2 className="text-base font-bold text-slate-800 mb-1">Simulating Disruption</h2>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            Calculating inventory coverage, stockout windows, recovery options, and decision recommendations…
+          </p>
         </div>
       </div>
     );
   }
 
-  // ── Error ────────────────────────────────────────────────────────────────
-  if (error) {
+  // ── Error View ─────────────────────────────────────────────────────────────
+
+  if (error || !result) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center max-w-md p-8 bg-white rounded-xl shadow-lg">
-          <h2 className="mb-4 text-2xl font-bold text-gray-900">Simulation Unavailable</h2>
-          <p className="mb-6 text-red-600 text-sm" role="alert">{error}</p>
-          <div className="flex justify-center gap-3">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-xl border border-red-200 shadow-sm text-center max-w-md w-full">
+          <div className="w-12 h-12 bg-red-50 text-red-600 rounded-full flex items-center justify-center mx-auto mb-3 text-xl font-bold">
+            ⚠️
+          </div>
+          <h2 className="text-lg font-bold text-slate-900 mb-2">Simulation Unavailable</h2>
+          <p className="text-sm text-red-700 mb-6 leading-relaxed" role="alert">
+            {error || 'No simulation result could be generated.'}
+          </p>
+          <div className="flex justify-center gap-2">
             <button
               onClick={() => navigate('/dashboard')}
-              className="rounded-lg bg-gray-700 px-4 py-2 text-white hover:bg-gray-800 text-sm font-medium"
+              className="btn-action btn-action--secondary text-xs"
             >
               ← Dashboard
             </button>
             <button
               onClick={() => navigate(visualizationPath)}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 text-sm font-medium"
+              className="btn-action btn-action--primary text-xs"
             >
               Back to Visualization
             </button>
@@ -447,217 +317,775 @@ const SimulationImpact = () => {
     );
   }
 
-  // ── Derived values ───────────────────────────────────────────────────────
-  const riskColors = getRiskColors(result.riskLevel);
-  const disruptedRoute = result.disruptedRoute;
-  const productName = result.product?.name || supplyChain?.products?.[0]?.name || supplyChainData?.product || "Unavailable";
-  const productSku = result.product?.sku || supplyChain?.products?.[0]?.sku;
+  // ── Risk Explanation Copy ──────────────────────────────────────────────────
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  const riskExplanationText = (() => {
+    switch (riskLevel) {
+      case 'CRITICAL':
+        return 'Severe stockout imminent for high-criticality product. Immediate mitigation required.';
+      case 'HIGH':
+        return 'Substantial stockout projected. Available buffer fails to absorb route outage.';
+      case 'MEDIUM':
+        return 'Moderate vulnerability. Inventory absorbs failure or product criticality is moderate.';
+      case 'LOW':
+        return 'Minimal operational impact. Inventory buffer fully covers disruption duration.';
+      default:
+        return 'Risk cannot be quantified due to missing inventory or daily demand data.';
+    }
+  })();
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
-    <div className="supply-chain-container">
+    <div className="simulation-dashboard">
+      {/* ───────────────────────────────────────────────────────────────────
+          1. EXECUTIVE HEADER
+          Answers: WHAT FAILED? & HOW SEVERE IS IT?
+         ─────────────────────────────────────────────────────────────────── */}
+      <header className="exec-header">
+        <div className="exec-header__top">
+          <div>
+            <div className="exec-tag">
+              <span>⚠️</span>
+              <span>Supply Chain Disruption Analysis</span>
+            </div>
+            <h1 className="exec-header__title">
+              {chain?.name || 'Supply Chain Disruption'}
+            </h1>
+            <p className="exec-header__subtitle">
+              <strong>{productName}</strong>
+              {productSku ? ` • SKU: ${productSku}` : ''}
+              {` • Criticality: ${productCriticality}`}
+            </p>
+          </div>
 
-      {/* ── Page header ── */}
-      <div className="text-center">
-        <div className="mb-8 flex items-center justify-between flex-wrap gap-4 no-print">
-          <div className="flex gap-2">
+          {/* Action Toolbar */}
+          <div className="exec-header__actions no-print">
             <button
               onClick={() => navigate('/dashboard')}
-              className="rounded-lg bg-gray-700 px-4 py-2 text-white hover:bg-gray-800 text-sm font-medium"
+              className="btn-action btn-action--secondary"
+              title="Return to Dashboard"
             >
               ← Dashboard
             </button>
             <button
-              onClick={() => navigate(visualizationPath)}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 text-sm font-medium"
+              onClick={() => navigate('/my-supply-chains')}
+              className="btn-action btn-action--secondary"
+              title="View All My Supply Chains"
             >
-              Visualization
+              📦 My Supply Chains
             </button>
-          </div>
-          <h1 className="text-3xl lg:text-4xl font-bold text-gray-900">Simulation Impact Analysis</h1>
-          <div className="flex gap-2">
+            <button
+              onClick={() => navigate(visualizationPath)}
+              className="btn-action btn-action--dark"
+              title="Configure and run another scenario"
+            >
+              ⚡ Run Another Scenario
+            </button>
             <button
               onClick={handleExportJson}
-              className="rounded-lg bg-indigo-600 px-3 py-2 text-white hover:bg-indigo-700 text-sm font-medium flex items-center gap-1.5"
-              title="Download JSON Report"
+              className="btn-action btn-action--primary"
+              title="Download full JSON simulation report"
             >
-              <span>📥</span>
-              <span>Export JSON</span>
+              📥 Export JSON
             </button>
             <button
               onClick={handlePrint}
-              className="rounded-lg bg-gray-600 px-3 py-2 text-white hover:bg-gray-700 text-sm font-medium flex items-center gap-1.5"
-              title="Print / Save as PDF"
+              className="btn-action btn-action--secondary"
+              title="Print or save as PDF"
             >
-              <span>🖨️</span>
-              <span>Print / PDF</span>
-            </button>
-            <button
-              onClick={() => navigate("/create-supply-chain")}
-              className="rounded-lg bg-green-600 px-3 py-2 text-white hover:bg-green-700 text-sm font-medium"
-            >
-              New Chain
+              🖨️ Print / PDF
             </button>
           </div>
         </div>
-        <div className="mb-12 rounded-xl bg-white p-6 shadow-lg">
-          <h2 className="text-2xl font-bold text-blue-600">
-            Product: {productName}{productSku ? ` (${productSku})` : ""}
+
+        {/* Severed Route Banner */}
+        <div className="exec-banner">
+          <div className="exec-route-path">
+            <span>{fromName}</span>
+            <span className="exec-route-arrow">➔</span>
+            <span>{destName}</span>
+            <span className="exec-route-mode">
+              {disruptedRoute?.transportMode || 'Transport Mode'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="exec-route-duration">
+              {durationDays} DAY OUTAGE
+            </span>
+            <span className={getRiskClass(riskLevel)}>{riskLevel} RISK</span>
+          </div>
+        </div>
+      </header>
+
+      {/* ───────────────────────────────────────────────────────────────────
+          2. EXECUTIVE METRICS GRID
+          Answers: HOW SEVERE IS IT?
+         ─────────────────────────────────────────────────────────────────── */}
+      <section className="exec-metrics-grid" aria-label="Executive Metrics">
+        {/* Metric 1: Risk Level */}
+        <div className={`metric-card ${getMetricCardModifier(riskLevel)}`}>
+          <div className="metric-card__header">
+            <span className="metric-card__label">Risk Level</span>
+            <span className={getRiskClass(riskLevel)}>{riskLevel}</span>
+          </div>
+          <div className="metric-card__value">{riskLevel}</div>
+          <p className="metric-card__explanation">{riskExplanationText}</p>
+        </div>
+
+        {/* Metric 2: Disruption Duration */}
+        <div className="metric-card">
+          <div className="metric-card__header">
+            <span className="metric-card__label">Disruption Duration</span>
+            <span className="text-xs text-slate-400">Outage Window</span>
+          </div>
+          <div className="metric-card__value">{formatDays(durationDays)}</div>
+          <p className="metric-card__explanation">
+            Planned duration of severed transport connection.
+          </p>
+        </div>
+
+        {/* Metric 3: Inventory Coverage */}
+        <div className="metric-card">
+          <div className="metric-card__header">
+            <span className="metric-card__label">Inventory Coverage</span>
+            <span className="text-xs text-slate-400">Downstream Buffer</span>
+          </div>
+          <div className="metric-card__value">
+            {coverageDays != null ? formatDays(coverageDays) : 'Unavailable'}
+          </div>
+          <p className="metric-card__explanation">
+            {coverageDays != null
+              ? 'On-hand inventory available before supply halts.'
+              : 'Inventory buffer data is not configured.'}
+          </p>
+        </div>
+
+        {/* Metric 4: Projected Stockout */}
+        <div className="metric-card">
+          <div className="metric-card__header">
+            <span className="metric-card__label">Projected Stockout</span>
+            <span className="text-xs text-slate-400">Shortage Period</span>
+          </div>
+          <div
+            className={`metric-card__value ${
+              stockoutDays > 0 ? 'text-red-600' : stockoutDays === 0 ? 'text-emerald-700' : ''
+            }`}
+          >
+            {stockoutDays != null ? formatDays(stockoutDays) : 'Unavailable'}
+          </div>
+          <p className="metric-card__explanation">
+            {stockoutDays == null
+              ? 'Requires daily demand and inventory data.'
+              : stockoutDays === 0
+              ? 'Buffer fully covers disruption window (0 shortage).'
+              : `Expected ${stockoutDays}-day unfulfilled demand period.`}
+          </p>
+        </div>
+      </section>
+
+      {/* ───────────────────────────────────────────────────────────────────
+          3. DISRUPTION IMPACT MAP / LOGICAL NETWORK VIEW
+          Answers: WHAT FAILED? & WHAT WILL BE AFFECTED?
+         ─────────────────────────────────────────────────────────────────── */}
+      <section className="dash-card network-map-card">
+        <div className="dash-card__header">
+          <div>
+            <h2 className="dash-card__title">
+              <span>🗺️</span>
+              <span>Disruption Network Flow</span>
+            </h2>
+            <p className="dash-card__subtitle">
+              Logical supply-chain topology identifying severed connection and affected downstream facilities.
+            </p>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-slate-500 font-medium">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" /> Source
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-600 inline-block" /> Disrupted Route / Affected
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block" /> Unaffected
+            </span>
+          </div>
+        </div>
+
+        <div className="network-flow">
+          {nodes.length > 0 ? (
+            nodes.map((node, index) => {
+              const isSource = String(node._id) === String(disruptedRoute?.sourceNodeId);
+              const isDest = String(node._id) === String(disruptedRoute?.destinationNodeId);
+              const isAffected =
+                isDest || affectedNodes.some((an) => String(an._id) === String(node._id));
+              const boxModifier = isSource
+                ? 'network-node-box--source'
+                : isAffected
+                ? 'network-node-box--affected'
+                : 'network-node-box--unaffected';
+
+              const nextNode = nodes[index + 1];
+              let routeToNext = null;
+              if (nextNode) {
+                routeToNext = routes.find(
+                  (r) =>
+                    String(r.sourceNodeId) === String(node._id) &&
+                    String(r.destinationNodeId) === String(nextNode._id)
+                );
+              }
+              const isRouteDisrupted =
+                routeToNext &&
+                (String(routeToNext._id) === String(disruptedRoute?._id) ||
+                  (isSource && String(nextNode._id) === String(disruptedRoute?.destinationNodeId)));
+
+              return (
+                <div key={node._id || index} className="flex items-center">
+                  <div className={`network-node-box ${boxModifier}`}>
+                    <div className="network-node-type">{node.type || 'NODE'}</div>
+                    <div className="network-node-name" title={node.name}>
+                      {node.name || `Node ${index + 1}`}
+                    </div>
+                    <div className="network-node-loc" title={node.location}>
+                      {node.location || 'Location unspecified'}
+                    </div>
+                    {node.capacity != null && (
+                      <div className="text-[10px] text-slate-400 mt-1">
+                        Cap: {Number(node.capacity).toLocaleString('en-IN')}
+                      </div>
+                    )}
+                    <div
+                      className={`network-node-status ${
+                        isSource
+                          ? 'network-node-status--source'
+                          : isAffected
+                          ? 'network-node-status--affected'
+                          : 'network-node-status--unaffected'
+                      }`}
+                    >
+                      {isSource ? '● Origin Node' : isAffected ? '● Affected' : '✓ Unaffected'}
+                    </div>
+                  </div>
+
+                  {nextNode && (
+                    <div
+                      className={`network-connector ${
+                        isRouteDisrupted ? 'network-connector--disrupted' : ''
+                      }`}
+                    >
+                      <div className="network-connector__line" />
+                      <div className="network-connector__badge">
+                        {isRouteDisrupted ? (
+                          <span>
+                            ╳ {routeToNext?.transportMode || disruptedRoute?.transportMode || 'ROUTE'}{' '}
+                            (SEVERED)
+                          </span>
+                        ) : (
+                          <span>➔ {routeToNext?.transportMode || 'TRANSIT'}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          ) : (
+            // Fallback if nodes array is not yet loaded
+            <div className="flex items-center gap-4 py-4 text-xs text-slate-600">
+              <div className="network-node-box network-node-box--source">
+                <div className="network-node-type">SOURCE</div>
+                <div className="network-node-name">{fromName}</div>
+                <div className="network-node-status network-node-status--source">● Origin</div>
+              </div>
+              <div className="network-connector network-connector--disrupted">
+                <div className="network-connector__line" />
+                <div className="network-connector__badge">
+                  ╳ {disruptedRoute?.transportMode || 'ROUTE'} (SEVERED)
+                </div>
+              </div>
+              <div className="network-node-box network-node-box--affected">
+                <div className="network-node-type">DESTINATION</div>
+                <div className="network-node-name">{destName}</div>
+                <div className="network-node-status network-node-status--affected">● Affected</div>
+              </div>
+              {affectedNodes.length > 1 && (
+                <div className="text-xs text-red-600 font-semibold pl-2">
+                  + {affectedNodes.length - 1} additional downstream node(s) impacted
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ───────────────────────────────────────────────────────────────────
+          4. "WHAT HAPPENS?" SECTION: AFFECTED DOWNSTREAM NODES
+          Answers: WHAT WILL BE AFFECTED?
+         ─────────────────────────────────────────────────────────────────── */}
+      <section className="dash-card">
+        <div className="dash-card__header">
+          <div>
+            <h2 className="dash-card__title">
+              <span>⚠️</span>
+              <span>Downstream Operational Impact</span>
+            </h2>
+            <p className="dash-card__subtitle">
+              Facilities experiencing immediate incoming shipment disruption due to the severed route.
+            </p>
+          </div>
+          <span className="text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-md">
+            {affectedNodes.length} Affected Node{affectedNodes.length === 1 ? '' : 's'}
+          </span>
+        </div>
+
+        {affectedNodes.length > 0 ? (
+          <div className="affected-nodes-grid">
+            {affectedNodes.map((node, index) => (
+              <div key={node._id || index} className="affected-node-card">
+                <div>
+                  <div className="affected-node-card__header">
+                    <span className="affected-node-card__type">{node.type || 'FACILITY'}</span>
+                    <span className="affected-node-card__status">● Supply Halted</span>
+                  </div>
+                  <h3 className="affected-node-card__name">{node.name}</h3>
+                  <p className="affected-node-card__location">{node.location || 'Location unspecified'}</p>
+                </div>
+                <div className="affected-node-card__metrics">
+                  <span>
+                    Capacity: <strong>{node.capacity != null ? Number(node.capacity).toLocaleString('en-IN') : 'N/A'}</strong>
+                  </span>
+                  <span>
+                    Inventory:{' '}
+                    <strong>{node.inventory != null ? `${node.inventory} units` : 'Not defined'}</strong>
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-600 italic">
+            No downstream nodes are directly impacted by this route disruption.
+          </div>
+        )}
+      </section>
+
+      {/* ───────────────────────────────────────────────────────────────────
+          5. INVENTORY / STOCKOUT TIMELINE
+          Answers: WHEN WILL THE SUPPLY SHORTAGE HAPPEN?
+         ─────────────────────────────────────────────────────────────────── */}
+      <section className="dash-card timeline-card">
+        <div className="dash-card__header">
+          <div>
+            <h2 className="dash-card__title">
+              <span>⏱️</span>
+              <span>Disruption & Stockout Timeline</span>
+            </h2>
+            <p className="dash-card__subtitle">
+              Deterministic progression: Disruption window ({durationDays}d) vs. Inventory buffer ({coverageDays ?? 'N/A'}d) vs. Projected stockout ({stockoutDays ?? 'N/A'}d).
+            </p>
+          </div>
+        </div>
+
+        {coverageDays == null || stockoutDays == null ? (
+          <div className="p-6 bg-slate-50 border border-slate-200 rounded-lg text-center">
+            <div className="text-xl mb-1">ℹ️</div>
+            <h4 className="text-sm font-bold text-slate-800 mb-1">Timeline Data Insufficient</h4>
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
+              A deterministic timeline cannot be rendered because inventory buffer or daily demand data is not configured for downstream nodes.
+            </p>
+          </div>
+        ) : (
+          <div className="timeline-visual">
+            {/* Visual Bar */}
+            {stockoutDays === 0 ? (
+              // Case: Buffer covers disruption
+              <div>
+                <div className="timeline-bar">
+                  <div
+                    className="timeline-segment timeline-segment--coverage"
+                    style={{ width: '100%' }}
+                  >
+                    Inventory Buffer Active ({coverageDays}d buffer covers {durationDays}d outage)
+                  </div>
+                </div>
+                <div className="timeline-milestones">
+                  <div className="timeline-milestone text-left">
+                    <span className="timeline-milestone__day">Day 0</span>
+                    <span className="timeline-milestone__desc">Outage Begins</span>
+                  </div>
+                  <div className="timeline-milestone text-center">
+                    <span className="timeline-milestone__day">Day {durationDays}</span>
+                    <span className="timeline-milestone__desc text-emerald-600 font-semibold">
+                      Outage Ends • 0 Stockout Days
+                    </span>
+                  </div>
+                  <div className="timeline-milestone text-right">
+                    <span className="timeline-milestone__day">Day {coverageDays}</span>
+                    <span className="timeline-milestone__desc">Full Buffer Runout</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              // Case: Stockout occurs
+              <div>
+                <div className="timeline-bar">
+                  <div
+                    className="timeline-segment timeline-segment--coverage"
+                    style={{
+                      width: `${Math.max(10, Math.min(90, (coverageDays / durationDays) * 100))}%`,
+                    }}
+                  >
+                    Buffer ({coverageDays}d)
+                  </div>
+                  <div
+                    className="timeline-segment timeline-segment--stockout"
+                    style={{
+                      width: `${Math.max(10, Math.min(90, (stockoutDays / durationDays) * 100))}%`,
+                    }}
+                  >
+                    Stockout Shortage ({stockoutDays}d)
+                  </div>
+                </div>
+                <div className="timeline-milestones">
+                  <div className="timeline-milestone text-left">
+                    <span className="timeline-milestone__day">Day 0</span>
+                    <span className="timeline-milestone__desc">Outage Begins</span>
+                  </div>
+                  <div className="timeline-milestone text-center">
+                    <span className="timeline-milestone__day">Day {coverageDays}</span>
+                    <span className="timeline-milestone__desc text-red-600 font-semibold">
+                      Buffer Depleted • Shortage Starts
+                    </span>
+                  </div>
+                  <div className="timeline-milestone text-right">
+                    <span className="timeline-milestone__day">Day {durationDays}</span>
+                    <span className="timeline-milestone__desc">Route Restored</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="timeline-legend">
+              <div className="timeline-legend__item">
+                <span className="timeline-legend__dot timeline-legend__dot--coverage" />
+                <span>Inventory Buffer Active (Fulfilled from stock)</span>
+              </div>
+              <div className="timeline-legend__item">
+                <span className="timeline-legend__dot timeline-legend__dot--stockout" />
+                <span>Projected Stockout Period (Unfulfilled customer demand)</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ───────────────────────────────────────────────────────────────────
+          6. OPERATIONAL IMPACT SUMMARY
+          Factual data table supported strictly by backend
+         ─────────────────────────────────────────────────────────────────── */}
+      <section className="dash-card">
+        <div className="dash-card__header">
+          <h2 className="dash-card__title">
+            <span>📊</span>
+            <span>Deterministic Impact Facts</span>
           </h2>
-          <p className="mt-2 text-gray-500 text-sm">
-            Deterministic route-failure simulation — numerical results are calculated from saved supply-chain data.
-            AI explanation is additive and does not modify these values.
-          </p>
+          <span className="text-xs text-slate-400 font-mono">Backend Risk Engine Truth</span>
         </div>
-      </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <table className="fact-table">
+            <tbody>
+              <tr>
+                <td className="fact-key">Severed Route Connection</td>
+                <td className="fact-val">{fromName} ➔ {destName}</td>
+              </tr>
+              <tr>
+                <td className="fact-key">Transport Mode</td>
+                <td className="fact-val">{disruptedRoute?.transportMode || 'Unavailable'}</td>
+              </tr>
+              <tr>
+                <td className="fact-key">Baseline Transit Time</td>
+                <td className="fact-val">{formatDays(disruptedRoute?.transitDays)}</td>
+              </tr>
+              <tr>
+                <td className="fact-key">Baseline Route Cost</td>
+                <td className="fact-val">{formatCost(disruptedRoute?.cost)}</td>
+              </tr>
+            </tbody>
+          </table>
 
-      {/* ── Section 1: Risk Impact Summary ── */}
-      <section className="impact-summary-section">
-        <div className={`impact-summary-card border ${riskColors}`}>
-          <div className="flex items-center gap-3 mb-4">
-            <h3 className="text-2xl font-bold">Risk Level:</h3>
-            <span className={getRiskBadgeClass(result.riskLevel)}>{result.riskLevel}</span>
-          </div>
-          {result.riskLevel === "UNKNOWN" && (
-            <p className="mb-4 text-xs text-gray-600 bg-white/70 p-2.5 rounded-lg border border-gray-200">
-              Risk level cannot be determined: {result.affectedNodes?.length === 0 ? "no downstream nodes are affected by this route disruption." : "daily demand or downstream inventory data is not defined."}
+          <table className="fact-table">
+            <tbody>
+              <tr>
+                <td className="fact-key">Route Throughput Capacity</td>
+                <td className="fact-val">
+                  {disruptedRoute?.capacityPerDay != null
+                    ? `${Number(disruptedRoute.capacityPerDay).toLocaleString('en-IN')} units/day`
+                    : 'Unavailable'}
+                </td>
+              </tr>
+              <tr>
+                <td className="fact-key">Available Inventory Buffer</td>
+                <td className="fact-val">{formatDays(coverageDays)}</td>
+              </tr>
+              <tr>
+                <td className="fact-key">Projected Stockout Duration</td>
+                <td className="fact-val text-red-600 font-bold">{formatDays(stockoutDays)}</td>
+              </tr>
+              <tr>
+                <td className="fact-key">Impacted Downstream Facilities</td>
+                <td className="fact-val">{affectedNodes.length} node{affectedNodes.length === 1 ? '' : 's'}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* ───────────────────────────────────────────────────────────────────
+          7. ALTERNATIVE ROUTE / RECOVERY OPTIONS
+          Answers: WHAT ARE THE RECOVERY OPTIONS?
+         ─────────────────────────────────────────────────────────────────── */}
+      <section className="dash-card">
+        <div className="dash-card__header">
+          <div>
+            <h2 className="dash-card__title">
+              <span>🔄</span>
+              <span>Alternative Route Recovery Options</span>
+            </h2>
+            <p className="dash-card__subtitle">
+              Configured parallel routes connecting {fromName} and {destName} evaluated for rerouting feasibility.
             </p>
-          )}
-          <div className="impact-metrics">
-            <MetricRow
-              label="Disruption Type"
-              value="ROUTE_FAILURE"
-              subtitle="Single route severed"
-            />
-            <MetricRow
-              label="Disruption Duration"
-              value={formatDays(result.disruption?.durationDays)}
-              subtitle="Planned outage period"
-            />
-            <MetricRow
-              label="Inventory Coverage"
-              value={
-                result.inventoryCoverageDays != null
-                  ? `${Number.isInteger(result.inventoryCoverageDays) ? result.inventoryCoverageDays : Number(result.inventoryCoverageDays.toFixed(1))} days`
-                  : "Data unavailable"
-              }
-              subtitle="Buffer available before depletion"
-            />
-            <MetricRow
-              label="Projected Stockout"
-              value={
-                result.stockoutDays == null
-                  ? "Data unavailable"
-                  : result.stockoutDays === 0
-                  ? "0 days"
-                  : `${Number.isInteger(result.stockoutDays) ? result.stockoutDays : Number(result.stockoutDays.toFixed(1))} days`
-              }
-              valueClass={result.stockoutDays > 0 ? "text-red-700 font-bold" : ""}
-              subtitle={
-                result.stockoutDays == null
-                  ? "Requires daily demand data"
-                  : result.stockoutDays === 0
-                  ? "Buffer covers disruption"
-                  : "Unfulfilled demand period"
-              }
-            />
           </div>
+          <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md">
+            {alternatives.length} Option{alternatives.length === 1 ? '' : 's'} Available
+          </span>
         </div>
-      </section>
 
-      {/* ── Section 2: Disrupted Route ── */}
-      <section className="broken-links-section">
-        <div className="broken-links-card">
-          <h3 className="mb-4 text-xl font-bold">Disrupted Route</h3>
-          <DisruptedRoutePath
-            brokenLinks={brokenLinks}
-            disruptedRoute={disruptedRoute}
-            supplyChain={supplyChain}
-          />
-          {disruptedRoute && (
-            <div className="mt-4 flex flex-wrap gap-6 text-sm text-gray-600">
-              {disruptedRoute.transitDays != null && (
-                <span className="route-time">
-                  Transit: <strong>{formatDays(disruptedRoute.transitDays)}</strong>
-                </span>
-              )}
-              {disruptedRoute.cost != null && (
-                <span className="route-cost">
-                  Cost: <strong>{formatCostAbsolute(disruptedRoute.cost)}</strong>
-                </span>
-              )}
-              {disruptedRoute.capacityPerDay != null && (
-                <span className="route-time">
-                  Capacity: <strong>{disruptedRoute.capacityPerDay.toLocaleString("en-IN")} units/day</strong>
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* ── Section 3: Affected Downstream Nodes ── */}
-      <section className="summary-section">
-        <div className="summary-card">
-          <h3 className="summary-title">Affected Downstream Nodes</h3>
-          {result.affectedNodes && result.affectedNodes.length > 0 ? (
-            <ul className="mt-4 list-inside list-disc text-gray-700 space-y-1">
-              {result.affectedNodes.map((node, index) => (
-                <li key={node._id || `${node.name}-${index}`}>
-                  <strong className="text-gray-900">{node.location || node.name}</strong>
-                  {node.type ? ` (${node.type})` : ""}
-                  {node.location && node.name && node.name !== node.location ? ` — ${node.name}` : ""}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-4 text-gray-500 italic">
-              No downstream nodes are affected by this route disruption.
+        {alternatives.length === 0 ? (
+          <div className="p-6 bg-slate-50 border border-slate-200 rounded-lg">
+            <h4 className="text-sm font-bold text-slate-800 mb-1">
+              No comparable recovery route is currently configured.
+            </h4>
+            <p className="text-xs text-slate-600 mb-4 leading-relaxed">
+              To evaluate multi-modal resilience and rerouting, configure a secondary route between {fromName} and {destName} with transit duration and cost in the supply chain builder.
             </p>
-          )}
-        </div>
-      </section>
+            <button
+              onClick={() => navigate('/create-supply-chain')}
+              className="btn-action btn-action--primary text-xs"
+            >
+              + Configure Alternative Route in Builder
+            </button>
+          </div>
+        ) : (
+          <div className="alternatives-container">
+            {alternatives.map((alt, index) => {
+              const isRecommended = index === recommendedAltIndex;
+              const additionalCost = alt.additionalCost;
+              const timeSaved = alt.timeSaved;
 
-      {/* ── Section 4: Alternative Routes — Tradeoff Comparison ── */}
-      <section className="alternative-routes-section">
-        <div className="alternative-routes-card">
-          <h3 className="summary-title">Alternative Routes — Tradeoff Comparison</h3>
-          <p className="mt-1 mb-4 text-sm text-gray-500">
-            Direct replacement route options connecting the same source and destination as the disrupted route.
-            Comparison metrics are computed deterministically from saved supply-chain data.
-          </p>
+              const costDeltaLabel =
+                additionalCost > 0
+                  ? `+₹${Math.abs(additionalCost).toLocaleString('en-IN')}`
+                  : additionalCost < 0
+                  ? `-₹${Math.abs(additionalCost).toLocaleString('en-IN')}`
+                  : '₹0';
 
-          {alternatives.length === 0 ? (
-            <div className="alternative-route-item p-4 bg-gray-50 rounded-xl border border-gray-200">
-              <p className="route-description text-gray-700 font-medium">No alternative routes available.</p>
-              <p className="mt-1 text-sm text-gray-500">
-                To evaluate alternative routes, add a secondary route between the same two nodes with transit days and cost set in the supply chain builder.
-              </p>
-            </div>
-          ) : (
-            <div className="alternative-routes-list">
-              {alternatives.map((alt, index) => (
-                <TradeoffCard
+              const timeSavedLabel =
+                timeSaved > 0
+                  ? `${timeSaved}d faster`
+                  : timeSaved < 0
+                  ? `${Math.abs(timeSaved)}d slower`
+                  : '0d difference';
+
+              return (
+                <div
                   key={alt.routeId || index}
-                  alt={alt}
-                  disruptedRoute={disruptedRoute}
-                  stockoutDays={result.stockoutDays}
-                  index={index}
-                />
-              ))}
-            </div>
-          )}
+                  className={`alt-card ${isRecommended ? 'alt-card--recommended' : ''}`}
+                >
+                  <div className="alt-card__header">
+                    <div className="alt-card__mode">
+                      <span>Option #{index + 1}: {alt.transportMode}</span>
+                      {isRecommended && (
+                        <span className="alt-card__badge-rec">Recommended Option</span>
+                      )}
+                    </div>
+                    <StockoutAvoidedBadge value={alt.stockoutAvoided} stockoutDays={stockoutDays} />
+                  </div>
 
-          <p className="mt-6 text-xs text-gray-400">
-            * Stockout avoided indicates whether the alternative route transit time restores supply before inventory runs out based on
-            the configured transit time and disruption duration — not an AI prediction.
+                  <div className="alt-comparison-grid">
+                    <div className="alt-stat">
+                      <div className="alt-stat__label">Transit Time</div>
+                      <div className="alt-stat__value">{formatDays(alt.transitDays)}</div>
+                    </div>
+                    <div className="alt-stat">
+                      <div className="alt-stat__label">Route Cost</div>
+                      <div className="alt-stat__value">{formatCost(alt.cost)}</div>
+                    </div>
+                    <div className="alt-stat">
+                      <div className="alt-stat__label">Time Delta vs Baseline</div>
+                      <div
+                        className={`alt-stat__value ${
+                          timeSaved > 0
+                            ? 'alt-stat__value--better'
+                            : timeSaved < 0
+                            ? 'alt-stat__value--worse'
+                            : 'alt-stat__value--neutral'
+                        }`}
+                      >
+                        {timeSavedLabel}
+                      </div>
+                    </div>
+                    <div className="alt-stat">
+                      <div className="alt-stat__label">Cost Delta vs Baseline</div>
+                      <div
+                        className={`alt-stat__value ${
+                          additionalCost < 0
+                            ? 'alt-stat__value--better'
+                            : additionalCost > 0
+                            ? 'alt-stat__value--worse'
+                            : 'alt-stat__value--neutral'
+                        }`}
+                      >
+                        {costDeltaLabel}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* ───────────────────────────────────────────────────────────────────
+          8. DECISION SUMMARY
+          Executive synthesis based strictly on backend facts
+         ─────────────────────────────────────────────────────────────────── */}
+      <section className="decision-summary-card">
+        <h3 className="decision-summary-title">
+          <span>📋</span>
+          <span>Executive Decision Summary</span>
+        </h3>
+        <div className="decision-summary-body space-y-2">
+          <p>
+            <strong>Current Situation:</strong> A {durationDays}-day disruption on the{' '}
+            <strong>{disruptedRoute?.transportMode || 'primary'}</strong> route from{' '}
+            <strong>{fromName}</strong> to <strong>{destName}</strong> severs the primary replenishment flow.
+          </p>
+          <p>
+            <strong>Operational Consequence:</strong> Downstream inventory covers approximately{' '}
+            <strong>{coverageDays != null ? `${coverageDays} day(s)` : 'unknown days'}</strong>,{' '}
+            {stockoutDays > 0 ? (
+              <span className="text-red-700 font-semibold">
+                resulting in a projected {stockoutDays}-day stockout across {affectedNodes.length} facility(ies).
+              </span>
+            ) : stockoutDays === 0 ? (
+              <span className="text-emerald-700 font-semibold">
+                which fully absorbs the outage without any projected customer stockout.
+              </span>
+            ) : (
+              'preventing exact stockout quantification due to missing demand data.'
+            )}
+          </p>
+          <p>
+            <strong>Recovery Feasibility:</strong>{' '}
+            {alternatives.length > 0 ? (
+              <span>
+                {alternatives.length} alternative route option(s) available.{' '}
+                {alternatives.some((a) => a.stockoutAvoided) ? (
+                  <span className="text-emerald-700 font-semibold">
+                    At least one alternative restores supply fast enough to prevent stockout.
+                  </span>
+                ) : (
+                  <span>
+                    No configured alternative route avoids stockout completely; evaluate expedited freight or inventory buffer expansion.
+                  </span>
+                )}
+              </span>
+            ) : (
+              <span>
+                No alternative route is currently configured between these nodes. Multi-modal redundancy is recommended.
+              </span>
+            )}
           </p>
         </div>
       </section>
 
-      {/* ── Section 5: AI Analysis ── */}
-      <AiAnalysisSection analysis={analysis} aiAvailable={aiAvailable} />
+      {/* ───────────────────────────────────────────────────────────────────
+          9. AI DECISION SUPPORT
+          Answers: WHAT DOES THE AI RECOMMEND?
+         ─────────────────────────────────────────────────────────────────── */}
+      <section className="ai-section-card">
+        <div className="dash-card__header">
+          <div>
+            <h2 className="dash-card__title">
+              <span>🤖</span>
+              <span>AI Decision Support</span>
+            </h2>
+            <p className="dash-card__subtitle">
+              Qualitative contextual explanation, risk advisory, and mitigation tradeoffs.
+            </p>
+          </div>
+          <span
+            className={`ai-provider-pill ${
+              aiAvailable ? 'ai-provider-pill--gemini' : 'ai-provider-pill--fallback'
+            }`}
+          >
+            {aiAvailable ? '✦ Powered by Gemini AI' : '⚡ Deterministic Fallback Engine'}
+          </span>
+        </div>
 
+        {analysis ? (
+          <div className="space-y-3">
+            {/* Situation */}
+            {analysis.summary && (
+              <div className="ai-subcard">
+                <h4 className="ai-subcard__title">Situation Overview</h4>
+                <p className="ai-subcard__text">{analysis.summary}</p>
+              </div>
+            )}
+
+            {/* Risk Explanation */}
+            {analysis.riskExplanation && (
+              <div className="ai-subcard">
+                <h4 className="ai-subcard__title">Why This Disruption Matters</h4>
+                <p className="ai-subcard__text">{analysis.riskExplanation}</p>
+              </div>
+            )}
+
+            {/* Recommendations */}
+            {analysis.recommendations && analysis.recommendations.length > 0 && (
+              <div className="ai-subcard">
+                <h4 className="ai-subcard__title">Recommended Actions</h4>
+                <ol className="ai-list">
+                  {analysis.recommendations.map((rec, i) => (
+                    <li key={i}>{rec}</li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {/* Trade-offs */}
+            {analysis.tradeoffs && analysis.tradeoffs.length > 0 && (
+              <div className="ai-subcard">
+                <h4 className="ai-subcard__title">Operational Trade-Offs</h4>
+                <ul className="ai-list">
+                  {analysis.tradeoffs.map((tradeoff, i) => (
+                    <li key={i}>{tradeoff}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="ai-disclaimer-box">
+              ⚠️ <strong>Notice:</strong> All numerical metrics (coverage days, stockout duration, route costs) are calculated deterministically by the backend Risk Engine. AI advisory provides explanatory context and does not alter numerical simulation results.
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
+            AI analysis is currently unavailable. Numerical risk metrics and deterministic route evaluations remain fully authoritative.
+          </div>
+        )}
+      </section>
     </div>
   );
 };

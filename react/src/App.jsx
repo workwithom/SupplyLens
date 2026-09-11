@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import LandingPage from './components/LandingPage';
 import SupplyChainBuilder from './components/SupplyChainBuilder';
 import SupplyChainVisualization from './components/SupplyChainVisualization';
@@ -7,7 +7,7 @@ import Login from './components/Login';
 import SignUp from './components/SignUp';
 import Navbar from './components/Navbar';
 import PrivateRoute from './components/PrivateRoute';
-import RiskAnalysisPage from './components/RiskAnalysisPage';
+import MySupplyChains from './components/MySupplyChains';
 import Dashboard from './components/Dashboard';
 import './App.css';
 
@@ -20,10 +20,10 @@ function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
           <Route path="/create-supply-chain" element={<PrivateRoute><SupplyChainBuilder /></PrivateRoute>} />
-          <Route path="/supply-chain-visualization" element={<PrivateRoute><SupplyChainVisualization /></PrivateRoute>} />
+          <Route path="/my-supply-chains" element={<PrivateRoute><MySupplyChains /></PrivateRoute>} />
+          <Route path="/supply-chain-visualization" element={<Navigate to="/my-supply-chains" replace />} />
           <Route path="/supply-chain-visualization/:id" element={<PrivateRoute><SupplyChainVisualization /></PrivateRoute>} />
           <Route path="/simulation-impact" element={<PrivateRoute><SimulationImpact /></PrivateRoute>} />
-          <Route path="/risk-analysis" element={<PrivateRoute><RiskAnalysisPage /></PrivateRoute>} />
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<SignUp />} />
         </Routes>
